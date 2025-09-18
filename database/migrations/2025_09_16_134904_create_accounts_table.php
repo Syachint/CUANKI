@@ -17,6 +17,7 @@ return new class extends Migration
             $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
             $table->string('account_name');
             $table->decimal('initial_balance', 15, 2)->default(0);
+            $table->decimal('current_balance', 15, 2)->default(0);
             $table->timestamps();
         });
     }
