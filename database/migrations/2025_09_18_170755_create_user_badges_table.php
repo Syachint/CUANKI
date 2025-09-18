@@ -11,14 +11,13 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('budgets', function (Blueprint $table) {
+        Schema::create('user_badges', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('user_id');
-            $table->unsignedBigInteger('account_id');
+            $table->unsignedBigInteger('badge_id');
             $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
-            $table->foreign('account_id')->references('id')->on('accounts')->onDelete('cascade');
-            $table->decimal('daily_budget', 15, 2);
-            $table->decimal('daily_saving', 15, 2);
+            $table->foreign('badge_id')->references('id')->on('badges')->onDelete('cascade');
+            $table->timestamp('awarded_at')->useCurrent();
             $table->timestamps();
         });
     }
@@ -28,6 +27,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('budgets');
+        Schema::dropIfExists('user_badges');
     }
 };

@@ -17,7 +17,8 @@ return new class extends Migration
             $table->unsignedBigInteger('account_id');
             $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
             $table->foreign('account_id')->references('id')->on('accounts')->onDelete('cascade');
-            $table->decimal('target_amount', 15, 2);
+            $table->boolean('is_first')->default(false);
+            $table->decimal('target_amount', 15, 2)->nullable();
             $table->date('target_deadline');
             $table->string('goal_name');
             $table->decimal('goal_amount', 15, 2);

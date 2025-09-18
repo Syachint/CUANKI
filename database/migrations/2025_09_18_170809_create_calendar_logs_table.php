@@ -11,14 +11,16 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('budgets', function (Blueprint $table) {
+        Schema::create('calendar_logs', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('user_id');
-            $table->unsignedBigInteger('account_id');
             $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
-            $table->foreign('account_id')->references('id')->on('accounts')->onDelete('cascade');
-            $table->decimal('daily_budget', 15, 2);
-            $table->decimal('daily_saving', 15, 2);
+            $table->date('date');
+            $table->decimal('planned_budget', 15, 2);
+            $table->decimal('actual_expense', 15, 2)->default(0);
+            $table->decimal('carryover_saving', 15, 2);
+            $table->boolean('is_ontrack')->default(true);
+            $table->string('note')->nullable();
             $table->timestamps();
         });
     }
@@ -28,6 +30,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('budgets');
+        Schema::dropIfExists('calendar_logs');
     }
 };
