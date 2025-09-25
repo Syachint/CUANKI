@@ -12,7 +12,10 @@ class User extends Authenticatable
 
     protected $fillable = [
         'google_id',
+        'email',
+        'password',
         'name',
+        'username',
         'age',
         'origin_id', // ID kota dari API eksternal
         'status',
@@ -26,17 +29,8 @@ class User extends Authenticatable
 
     // Optional: accessor buat munculin nama kota dari API
     // (nanti bisa dipanggil di controller/service)
-    public function getOriginNameAttribute()
+    public function origin()
     {
-        // default: null
-        $originName = null;
-
-        if ($this->origin_id) {
-            // TODO: ambil dari API kota (bisa pakai Http::get dsb.)
-            // contoh dummy aja dulu
-            $originName = "Nama Kota dari API untuk ID {$this->origin_id}";
-        }
-
-        return $originName;
+        return $this->belongsTo(Origin::class, 'origin_id', 'id');
     }
 }
