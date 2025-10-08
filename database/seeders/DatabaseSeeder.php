@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
             ExpenseCategorySeeder::class,
             OriginSeeder::class,
             BadgeSeeder::class,
+            BankDataSeeder::class,
         ]);
     }
 }

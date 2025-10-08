@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\User;
+use App\Models\Origin;
+use App\Models\Account;
 use App\Models\RefreshToken;
 use App\Models\PersonalAccessToken;
 use Laravel\Socialite\Facades\Socialite;
@@ -14,7 +16,7 @@ use Carbon\Carbon;
 
 class UserController extends Controller
 {
-    function registerUser1(Request $request) {
+    function registerUser(Request $request) {
         $validator = Validator::make($request->all(), [
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
@@ -34,8 +36,6 @@ class UserController extends Controller
         $data['name'] = $data['first_name'] . ' ' . $data['last_name'];
         $data['password'] = bcrypt($data['password']);
         $user = User::create($data);
-
-        $user->load('origin');
 
         // Buat access token
         $accessTokenExpiresAt = Carbon::now()->addMinutes(15);
@@ -59,69 +59,55 @@ class UserController extends Controller
         ], 201);
     }
 
-    function registerUser2(Request $request) {
-        $validator = Validator::make($request->all(), [
-            'user_id' => 'required|integer|exists:users,id',
-            'username' => 'required|string|max:255',
-            'age' => 'nullable|integer|min:0',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Validasi gagal',
-                'errors' => $validator->errors()
-            ], 401);
-        }
-
-        $user = User::find($request->user_id);
-        if (!$user) {
-            return response()->json([
-                'st atus' => 'error',
-                'message' => 'User tidak ditemukan',
-            ], 404);
-        }
-        $user->username = $request->username;
-        $user->age = $request->age;
-        $user->save();
-
-        $user->load('origin');
-
+    function getOrigins() {
+        $origins = Origin::all();
         return response()->json([
             'status' => 'success',
-            'message' => 'Lanjut step 3',
-            'data' => $user
-        ], 201);
+            'data' => $origins
+        ], 200);
     }
 
-    function registerUser3(Request $request) {
-        $validator = Validator::make($request->all(), [
-            'user_id' => 'required|integer|exists:users,id',
-            'origin_id' => 'nullable|integer',
-            'status' => 'required|in:mahasiswa,pelajar',
-        ]);
+    function formDetailUser(Request $request)
+        {
+            $user = $request->user();
 
-        if ($validator->fails()) {
+            $validator = Validator::make($request->all(), [
+                'username'  => 'required|string|max:255',
+                'age'       => 'nullable|integer|min:0',
+                'origin_id' => 'nullable|integer',
+                'status'    => 'required|in:mahasiswa,pelajar',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => 'Validasi data profil gagal. Pastikan data di semua step lengkap.',
+                    'errors'  => $validator->errors()
+                ], 401);
+            }
+
+            $user->username = $request->username;
+
+            if ($request->has('age')) {
+                $user->age = $request->age;
+            }
+
+            if ($request->has('origin_id')) {
+                $user->origin_id = $request->origin_id;
+            }
+            
+            $user->status = $request->status;
+
+            $user->save();
+
+            $user->load('origin');
+
             return response()->json([
-                'status' => 'error',
-                'message' => 'Validasi gagal',
-                'errors' => $validator->errors()
-            ], 401);
+                'status'  => 'success',
+                'message' => 'Semua data profil berhasil disimpan secara lengkap (Atomic Success).',
+                'data'    => $user
+            ], 201);
         }
-
-        $user = User::find($request->user_id);
-        $user->origin_id = $request->origin_id;
-        $user->status = $request->status;
-        $user->save();
-
-        $user->load('origin');
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Lanjut step 4',
-            'data' => $user
-        ], 201);
-    }
 
     function loginUser(Request $request) {
         $request->validate([

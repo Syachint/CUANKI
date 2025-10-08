@@ -68,22 +68,19 @@ class GoogleController extends Controller
      */
     private function generateTokensForUser($user)
     {
-        // Hapus token Sanctum lama
+        // Hapus semua token lama
         $user->tokens()->delete();
+        RefreshToken::where('user_id', $user->id)->delete();
 
         $user->load('origin');
         
-        // Bikin access token Sanctum baru
-        $access_token = $user->createToken('access_token')->plainTextToken;
-
-        // Hapus refresh token lama, lalu bikin baru
-        RefreshToken::where('user_id', $user->id)->delete();
-        $refresh_token = Str::random(64);
-        RefreshToken::create([
-            'user_id' => $user->id,
-            'token' => $refresh_token,
-            'expires_at' => Carbon::now()->addDays(30),
-        ]);
+        // Buat access token
+        $accessTokenExpiresAt = Carbon::now()->addMinutes(15);
+        $access_token = $user->createToken('access_token', ['access-api'], $accessTokenExpiresAt)->plainTextToken;
+        
+        // Buat refresh token menggunakan Sanctum
+        $refreshTokenExpiresAt = Carbon::now()->addDays(7);
+        $refresh_token = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;
 
         return response()->json([
             'status' => 'success',
@@ -93,6 +90,8 @@ class GoogleController extends Controller
                 'access_token' => $access_token,
                 'refresh_token' => $refresh_token,
                 'token_type' => 'Bearer',
+                'access_token_expires_at' => $accessTokenExpiresAt->toDateTimeString(),
+                'refresh_token_expires_at' => $refreshTokenExpiresAt->toDateTimeString()
             ]
         ], 200);
     }

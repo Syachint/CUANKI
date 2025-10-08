@@ -11,7 +11,6 @@ class AccountAllocation extends Model
     protected $table = 'accounts_allocation';
 
     protected $fillable = [
-        'user_id',
         'account_id',
         'type',
         'balance_per_type',
@@ -23,7 +22,7 @@ class AccountAllocation extends Model
 
     public function user()
     {
-        return $this->belongsTo(User::class, 'user_id');
+        return $this->hasOneThrough(User::class, Account::class, 'id', 'id', 'account_id', 'user_id');
     }
 
     public function account()

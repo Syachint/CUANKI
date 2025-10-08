@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use App\Models\User;
+use App\Models\BankData;
 use App\Models\Budget;
 use App\Models\Goal;
 use App\Models\AccountAllocation;
@@ -22,6 +23,7 @@ class Account extends Model
 
     protected $fillable = [
         'user_id',
+        'bank_id',
         'account_name',
         'initial_balance',
         'current_balance',
@@ -35,6 +37,11 @@ class Account extends Model
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function bank()
+    {
+        return $this->belongsTo(BankData::class, 'bank_id');
     }
 
     public function budgets()

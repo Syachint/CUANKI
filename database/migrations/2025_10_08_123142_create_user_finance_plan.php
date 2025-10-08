@@ -11,14 +11,14 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('accounts', function (Blueprint $table) {
+        Schema::create('user_finance_plan', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('user_id');
             $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
-            $table->unsignedBigInteger('bank_id');
-            $table->foreign('bank_id')->references('id')->on('bank_data')->onDelete('cascade');
-            $table->decimal('initial_balance', 15, 2)->default(0);
-            $table->decimal('current_balance', 15, 2)->default(0);
+            $table->decimal('monthly_income', 15, 2);
+            $table->integer('income_date'); // Tanggal penerimaan gaji (1-31)
+            $table->decimal('saving_target_amount', 15, 2);
+            $table->integer('saving_target_duration'); // Dalam tahun
             $table->timestamps();
         });
     }
@@ -28,6 +28,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('accounts');
+        Schema::dropIfExists('user_finance_plan');
     }
 };

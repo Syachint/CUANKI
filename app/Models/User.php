@@ -21,6 +21,13 @@ class User extends Authenticatable
         'status',
     ];
 
+    protected $hidden = [
+        'google_id',
+        'email',
+        'password',
+        'remember_token',
+    ];
+
     // Relasi contoh: user punya banyak akun
     public function accounts()
     {
