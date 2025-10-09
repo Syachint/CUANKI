@@ -31,24 +31,22 @@ RUN apk add --no-cache --virtual .build-deps $PHPIZE_DEPS \
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Copy composer files
-COPY composer.json composer.lock ./
-
-# Copy application code
+# Copy all Laravel project files (including public/)
 COPY . .
 
-# Install PHP dependencies
-RUN composer install --no-dev --no-scripts --no-autoloader --optimize-autoloader
+# Install PHP dependencies (optimized for production)
+RUN composer install --no-dev --optimize-autoloader
 
-
+# Optimize Laravel framework
+RUN php artisan config:clear \
+    && php artisan route:clear \
+    && php artisan view:clear \
+    && php artisan optimize
 
 # Set proper permissions
 RUN chown -R www-data:www-data /var/www \
     && chmod -R 755 /var/www/storage \
     && chmod -R 755 /var/www/bootstrap/cache
-
-# Finalize composer
-RUN composer dump-autoload --optimize
 
 # Configure PHP for production
 RUN echo "opcache.enable=1" >> /usr/local/etc/php/conf.d/opcache.ini \
