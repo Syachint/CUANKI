@@ -208,9 +208,9 @@ sleep 15
 # Run database migrations
 echo "🗄️  Running database migrations..."
 if check_docker_permissions; then
-    docker-compose exec -T app php artisan migrate --force --seed
+    docker-compose exec -T app php artisan migrate:fresh --seed
 else
-    sudo docker-compose exec -T app php artisan migrate --force --seed
+    sudo docker-compose exec -T app php artisan migrate:fresh --seed
 fi
 
 # Clear and cache config
