@@ -9,5 +9,5 @@ Route::get('/', function () {
 
 Route::controller(GoogleController::class)->group(function () {
     Route::get('/auth/google', 'googleLogin')->name('auth.google.aasasassas');
-    Routae::get('/auth/google/callback', 'googleAuthentication')->name('auth.google.callmeback');
+    Route::get('/auth/google/callback', 'googleAuthentication')->name('auth.google.callmeback');
 });
