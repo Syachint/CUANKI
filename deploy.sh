@@ -11,8 +11,17 @@ BRANCH="${1:-main}"  # Allow custom branch, default to main
 echo "🚀 Starting CUANKI API Deployment..."
 echo "📥 Downloading files from GitHub (branch: $BRANCH)..."
 
-# Function to check if user can run Docker without sudo
-check_docker_permission() {
+# Function to check if running as root
+check_root() {
+    if [ "$EUID" -eq 0 ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to check Docker permissions
+check_docker_permissions() {
     if docker ps >/dev/null 2>&1; then
         return 0
     else
@@ -22,38 +31,67 @@ check_docker_permission() {
 
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
-    echo "❌ Docker is not installed. Please install Docker first."
-    echo "💡 Install with: curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh"
-    exit 1
+    echo "❌ Docker is not installed. Installing Docker..."
+    if check_root; then
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+    else
+        echo "💡 Please run as root or install Docker manually:"
+        echo "   curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh"
+        exit 1
+    fi
 fi
 
 # Check if Docker Compose is installed
 if ! command -v docker-compose &> /dev/null; then
-    echo "❌ Docker Compose is not installed. Please install Docker Compose first."
-    echo "💡 Install with: sudo curl -L \"https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)\" -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose"
-    exit 1
+    echo "❌ Docker Compose is not installed. Installing..."
+    if check_root; then
+        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+    else
+        echo "💡 Please run as root or install Docker Compose manually:"
+        echo "   sudo curl -L \"https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)\" -o /usr/local/bin/docker-compose"
+        echo "   sudo chmod +x /usr/local/bin/docker-compose"
+        exit 1
+    fi
 fi
 
 # Check Docker permissions
-if ! check_docker_permission; then
+if ! check_docker_permissions; then
     echo "❌ Permission denied: Cannot access Docker daemon."
-    echo "💡 Please run: sudo usermod -aG docker $USER && newgrp docker"
-    echo "   Or run this script with: sudo ./deploy.sh"
-    exit 1
+    echo ""
+    echo "💡 Solutions:"
+    echo "   1. Run as root: sudo ./deploy.sh"
+    echo "   2. Add user to docker group:"
+    echo "      sudo usermod -aG docker $USER"
+    echo "      newgrp docker"
+    echo "      # Then logout and login again"
+    echo "   3. Or run specific command as root:"
+    echo "      sudo docker-compose up -d"
+    echo ""
+
+    read -p "Do you want me to add current user ($USER) to docker group? (y/N): " add_to_group
+    if [[ $add_to_group =~ ^[Yy]$ ]]; then
+        if check_root; then
+            usermod -aG docker $USER
+            echo "✅ User $USER added to docker group."
+            echo "⚠️  Please logout and login again, then run this script again."
+            exit 0
+        else
+            echo "❌ Need root privileges to add user to docker group."
+            echo "💡 Run: sudo usermod -aG docker $USER"
+            exit 1
+        fi
+    else
+        echo "❌ Cannot proceed without Docker access. Please fix permissions first."
+        exit 1
+    fi
 fi
 
 # Create necessary directories
 echo "📁 Creating directory structure..."
-mkdir -p nginx postgres ssl
-
-# Create storage directories with proper structure
-mkdir -p storage/app/public
-mkdir -p storage/framework/cache
-mkdir -p storage/framework/sessions
-mkdir -p storage/framework/views
-mkdir -p storage/logs
-mkdir -p bootstrap/cache
-mkdir -p public
+mkdir -p nginx postgres ssl storage/{app/public,framework/{cache,sessions,views},logs} bootstrap/cache public
 
 # Download required files
 echo "📥 Downloading configuration files..."
@@ -92,124 +130,143 @@ echo "✅ All files downloaded successfully!"
 if [ ! -f .env ]; then
     echo "📝 Creating .env file from template..."
     cp .env.server .env
-    
-    # Auto-detect server IP and set APP_URL
+
+    echo ""
+    echo "⚠️  IMPORTANT: Configure your environment variables!"
+    echo "   Edit .env file with your settings:"
+    echo "   - APP_KEY: Generate with 'openssl rand -base64 32' or use online generator"
+    echo "   - APP_URL: Your domain (e.g., http://your-domain.com or http://$(curl -s ifconfig.me 2>/dev/null || echo 'YOUR_SERVER_IP'))"
+    echo "   - DB_DATABASE: Database name (default: cuanki)"
+    echo "   - DB_USERNAME: Database user (default: cuanki_user)"
+    echo "   - DB_PASSWORD: Strong database password"
+    echo ""
+
+    # Auto-fill APP_URL with server IP if possible
     SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || echo "localhost")
     if [ "$SERVER_IP" != "localhost" ]; then
         sed -i "s|APP_URL=http://your-domain.com|APP_URL=http://$SERVER_IP|" .env
         echo "🌐 Auto-detected server IP: $SERVER_IP"
         echo "   APP_URL set to: http://$SERVER_IP"
     fi
-    
-    echo ""
-    echo "⚠️  IMPORTANT: Configure your environment variables!"
-    echo "   Current APP_URL: $(grep APP_URL .env | cut -d '=' -f2)"
-    echo "   - Change APP_URL if you have a domain"
-    echo "   - Update DB_PASSWORD for security"
-    echo ""
-    
+
     # Interactive setup
-    read -p "Do you want to edit .env now? (y/N): " configure_env
+    read -p "Do you want to configure .env now? (y/N): " configure_env
     if [[ $configure_env =~ ^[Yy]$ ]]; then
         echo "📝 Opening .env file for editing..."
         ${EDITOR:-nano} .env
+    else
+        echo "⚠️  Remember to configure .env before running the application!"
+        echo "   Edit with: nano .env"
     fi
 fi
 
 # Generate APP_KEY if not set
-if ! grep -q "APP_KEY=base64:" .env 2>/dev/null || grep -q "your_generated_app_key_here" .env 2>/dev/null; then
+if ! grep -q "APP_KEY=base64:" .env 2>/dev/null || grep -q "APP_KEY=base64:your_generated_app_key_here" .env 2>/dev/null; then
     echo "🔑 Generating APP_KEY..."
     if command -v openssl &> /dev/null; then
         APP_KEY="base64:$(openssl rand -base64 32)"
         sed -i "s|APP_KEY=.*|APP_KEY=$APP_KEY|" .env
         echo "✅ APP_KEY generated successfully!"
     else
-        echo "⚠️  OpenSSL not found. Using fallback method..."
-        APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
-        sed -i "s|APP_KEY=.*|APP_KEY=$APP_KEY|" .env
-        echo "✅ APP_KEY generated successfully!"
+        echo "⚠️  Please generate APP_KEY manually:"
+        echo "   Online: https://generate-random.org/laravel-key-generator"
+        echo "   Or use: openssl rand -base64 32"
     fi
 fi
 
-# Pull latest images first (this ensures images exist)
-echo "📦 Pulling latest Docker images..."
-docker-compose pull
+# Set proper permissions
+echo "🔐 Setting permissions..."
+chmod -R 775 storage 2>/dev/null || sudo chmod -R 775 storage
+chmod -R 775 bootstrap/cache 2>/dev/null || sudo chmod -R 775 bootstrap/cache
 
-# Stop existing containers if any
+# Function to run docker-compose with proper permissions
+run_docker_compose() {
+    if check_docker_permissions; then
+        docker-compose "$@"
+    else
+        echo "⚠️  Running with sudo due to permission issues..."
+        sudo docker-compose "$@"
+    fi
+}
+
+# Pull latest images
+echo "📦 Pulling latest Docker images..."
+run_docker_compose pull
+
+# Stop existing containers
 echo "🛑 Stopping existing containers..."
-docker-compose down 2>/dev/null || true
+run_docker_compose down
 
 # Start services
 echo "🚀 Starting services..."
-docker-compose up -d
+run_docker_compose up -d
 
-# Wait for services to be ready
-echo "⏳ Waiting for services to be ready..."
+# Wait for database to be ready
+echo "⏳ Waiting for database to be ready..."
 sleep 15
-
-# Fix permissions using Docker (this avoids host permission issues)
-echo "🔐 Setting permissions via Docker..."
-docker-compose exec -T app chown -R www-data:www-data /var/www/storage
-docker-compose exec -T app chown -R www-data:www-data /var/www/bootstrap/cache
-docker-compose exec -T app chmod -R 775 /var/www/storage
-docker-compose exec -T app chmod -R 775 /var/www/bootstrap/cache
-
-# Create storage symlink if doesn't exist
-echo "🔗 Creating storage symlink..."
-docker-compose exec -T app php artisan storage:link 2>/dev/null || true
 
 # Run database migrations
 echo "🗄️  Running database migrations..."
-docker-compose exec -T app php artisan migrate --force
+if check_docker_permissions; then
+    docker-compose exec -T app php artisan migrate --force --seed
+else
+    sudo docker-compose exec -T app php artisan migrate --force --seed
+fi
 
 # Clear and cache config
-echo "🧹 Optimizing Laravel..."
-docker-compose exec -T app php artisan config:cache
-docker-compose exec -T app php artisan route:cache
-docker-compose exec -T app php artisan view:cache
-
-# Final permission fix
-echo "🔧 Final permission adjustments..."
-docker-compose exec -T app chown -R www-data:www-data /var/www/storage
-docker-compose exec -T app chown -R www-data:www-data /var/www/bootstrap/cache
+echo "🧹 Clearing cache and optimizing..."
+if check_docker_permissions; then
+    docker-compose exec -T app php artisan config:cache
+    docker-compose exec -T app php artisan route:cache
+    docker-compose exec -T app php artisan view:cache
+else
+    sudo docker-compose exec -T app php artisan config:cache
+    sudo docker-compose exec -T app php artisan route:cache
+    sudo docker-compose exec -T app php artisan view:cache
+fi
 
 # Check services status
 echo "✅ Checking services status..."
-docker-compose ps
+run_docker_compose ps
 
 echo ""
 echo "🎉 Deployment completed successfully!"
 echo ""
 echo "📊 Service Status:"
-docker-compose ps
+run_docker_compose ps
 echo ""
-
-# Get the actual APP_URL from .env
-APP_URL=$(grep APP_URL .env 2>/dev/null | cut -d '=' -f2 || echo "http://localhost")
-echo "🌐 Your API is available at: $APP_URL"
-echo ""
-echo "🔍 Quick Health Check:"
-echo "   Test API: curl $APP_URL/api/health || curl $APP_URL"
+echo "🌐 Your API should be available at: $(grep APP_URL .env 2>/dev/null | cut -d '=' -f2 || echo 'Check your .env file')"
 echo ""
 echo "🛠️ Useful Commands:"
-echo "   📊 Check logs: docker-compose logs -f app"
-echo "   📊 All logs: docker-compose logs -f"
-echo "   🔄 Update app: docker-compose pull app && docker-compose up -d app"
-echo "   🗄️  Run migrations: docker-compose exec app php artisan migrate"
-echo "   🧹 Clear cache: docker-compose exec app php artisan config:clear"
-echo "   🛑 Stop all: docker-compose down"
-echo "   🔄 Restart: docker-compose restart"
-echo "   🔍 Access app shell: docker-compose exec app sh"
+if check_docker_permissions; then
+    echo "   📊 Check logs: docker-compose logs -f app"
+    echo "   📊 All logs: docker-compose logs -f"
+    echo "   🔄 Update app: docker-compose pull app && docker-compose up -d app"
+    echo "   🗄️  Run migrations: docker-compose exec app php artisan migrate --force"
+    echo "   🧹 Clear cache: docker-compose exec app php artisan config:clear"
+    echo "   🛑 Stop all: docker-compose down"
+    echo "   🔄 Restart: docker-compose restart"
+    echo "   🔍 Access app shell: docker-compose exec app sh"
+else
+    echo "   📊 Check logs: sudo docker-compose logs -f app"
+    echo "   📊 All logs: sudo docker-compose logs -f"
+    echo "   🔄 Update app: sudo docker-compose pull app && sudo docker-compose up -d app"
+    echo "   🗄️  Run migrations: sudo docker-compose exec app php artisan migrate --force"
+    echo "   🧹 Clear cache: sudo docker-compose exec app php artisan config:clear"
+    echo "   🛑 Stop all: sudo docker-compose down"
+    echo "   🔄 Restart: sudo docker-compose restart"
+    echo "   🔍 Access app shell: sudo docker-compose exec app sh"
+fi
 echo ""
 echo "🔧 Troubleshooting:"
 echo "   📝 Edit .env: nano .env"
-echo "   🔍 Check app logs: docker-compose logs app"
-echo "   🔍 Check nginx logs: docker-compose logs nginx"
-echo "   🔍 Check postgres logs: docker-compose logs postgres"
+echo "   🔍 Check app logs: $(check_docker_permissions && echo 'docker-compose' || echo 'sudo docker-compose') logs app"
+echo "   🔍 Check nginx logs: $(check_docker_permissions && echo 'docker-compose' || echo 'sudo docker-compose') logs nginx"
 echo ""
-echo "🔐 Security Notes:"
-echo "   - Change default DB_PASSWORD in .env"
-echo "   - Add SSL certificate to ssl/ directory for HTTPS"
-echo "   - Configure firewall to allow only necessary ports"
+echo "⚠️  Permission Notice:"
+if ! check_docker_permissions; then
+    echo "   🔐 You need sudo for Docker commands."
+    echo "   🔧 To fix permanently: sudo usermod -aG docker $USER && logout/login"
+fi
 echo ""
-echo "✅ CUANKI API is now running! 🚀"
+echo "✅ Setup complete! Your Laravel API is running in Docker containers."
