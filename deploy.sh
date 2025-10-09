@@ -11,6 +11,15 @@ BRANCH="${1:-main}"  # Allow custom branch, default to main
 echo "🚀 Starting CUANKI API Deployment..."
 echo "📥 Downloading files from GitHub (branch: $BRANCH)..."
 
+# Function to check if user can run Docker without sudo
+check_docker_permission() {
+    if docker ps >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
     echo "❌ Docker is not installed. Please install Docker first."
@@ -25,9 +34,26 @@ if ! command -v docker-compose &> /dev/null; then
     exit 1
 fi
 
+# Check Docker permissions
+if ! check_docker_permission; then
+    echo "❌ Permission denied: Cannot access Docker daemon."
+    echo "💡 Please run: sudo usermod -aG docker $USER && newgrp docker"
+    echo "   Or run this script with: sudo ./deploy.sh"
+    exit 1
+fi
+
 # Create necessary directories
 echo "📁 Creating directory structure..."
-mkdir -p nginx postgres ssl storage/{app/public,framework/{cache,sessions,views},logs} bootstrap/cache public
+mkdir -p nginx postgres ssl
+
+# Create storage directories with proper structure
+mkdir -p storage/app/public
+mkdir -p storage/framework/cache
+mkdir -p storage/framework/sessions
+mkdir -p storage/framework/views
+mkdir -p storage/logs
+mkdir -p bootstrap/cache
+mkdir -p public
 
 # Download required files
 echo "📥 Downloading configuration files..."
@@ -67,71 +93,85 @@ if [ ! -f .env ]; then
     echo "📝 Creating .env file from template..."
     cp .env.server .env
     
+    # Auto-detect server IP and set APP_URL
+    SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || echo "localhost")
+    if [ "$SERVER_IP" != "localhost" ]; then
+        sed -i "s|APP_URL=http://your-domain.com|APP_URL=http://$SERVER_IP|" .env
+        echo "🌐 Auto-detected server IP: $SERVER_IP"
+        echo "   APP_URL set to: http://$SERVER_IP"
+    fi
+    
     echo ""
     echo "⚠️  IMPORTANT: Configure your environment variables!"
-    echo "   Edit .env file with your settings:"
-    echo "   - APP_KEY: Generate with 'openssl rand -base64 32' or use online generator"
-    echo "   - APP_URL: Your domain (e.g., http://your-domain.com)"
-    echo "   - DB_DATABASE: Database name (default: cuanki)"
-    echo "   - DB_USERNAME: Database user (default: cuanki_user)"
-    echo "   - DB_PASSWORD: Strong database password"
+    echo "   Current APP_URL: $(grep APP_URL .env | cut -d '=' -f2)"
+    echo "   - Change APP_URL if you have a domain"
+    echo "   - Update DB_PASSWORD for security"
     echo ""
     
     # Interactive setup
-    read -p "Do you want to configure .env now? (y/N): " configure_env
+    read -p "Do you want to edit .env now? (y/N): " configure_env
     if [[ $configure_env =~ ^[Yy]$ ]]; then
         echo "📝 Opening .env file for editing..."
         ${EDITOR:-nano} .env
-    else
-        echo "⚠️  Remember to configure .env before running the application!"
-        echo "   Edit with: nano .env"
     fi
 fi
 
 # Generate APP_KEY if not set
-if ! grep -q "APP_KEY=base64:" .env 2>/dev/null; then
+if ! grep -q "APP_KEY=base64:" .env 2>/dev/null || grep -q "your_generated_app_key_here" .env 2>/dev/null; then
     echo "🔑 Generating APP_KEY..."
     if command -v openssl &> /dev/null; then
         APP_KEY="base64:$(openssl rand -base64 32)"
         sed -i "s|APP_KEY=.*|APP_KEY=$APP_KEY|" .env
         echo "✅ APP_KEY generated successfully!"
     else
-        echo "⚠️  Please generate APP_KEY manually:"
-        echo "   Online: https://generate-random.org/laravel-key-generator"
-        echo "   Or use: openssl rand -base64 32"
+        echo "⚠️  OpenSSL not found. Using fallback method..."
+        APP_KEY="base64:$(head -c 32 /dev/urandom | base64)"
+        sed -i "s|APP_KEY=.*|APP_KEY=$APP_KEY|" .env
+        echo "✅ APP_KEY generated successfully!"
     fi
 fi
 
-# Set proper permissions
-echo "🔐 Setting permissions..."
-chmod -R 775 storage
-chmod -R 775 bootstrap/cache
-
-# Pull latest images
+# Pull latest images first (this ensures images exist)
 echo "📦 Pulling latest Docker images..."
 docker-compose pull
 
-# Stop existing containers
+# Stop existing containers if any
 echo "🛑 Stopping existing containers..."
-docker-compose down
+docker-compose down 2>/dev/null || true
 
 # Start services
 echo "🚀 Starting services..."
 docker-compose up -d
 
-# Wait for database to be ready
-echo "⏳ Waiting for database to be ready..."
-sleep 10
+# Wait for services to be ready
+echo "⏳ Waiting for services to be ready..."
+sleep 15
+
+# Fix permissions using Docker (this avoids host permission issues)
+echo "🔐 Setting permissions via Docker..."
+docker-compose exec -T app chown -R www-data:www-data /var/www/storage
+docker-compose exec -T app chown -R www-data:www-data /var/www/bootstrap/cache
+docker-compose exec -T app chmod -R 775 /var/www/storage
+docker-compose exec -T app chmod -R 775 /var/www/bootstrap/cache
+
+# Create storage symlink if doesn't exist
+echo "🔗 Creating storage symlink..."
+docker-compose exec -T app php artisan storage:link 2>/dev/null || true
 
 # Run database migrations
 echo "🗄️  Running database migrations..."
 docker-compose exec -T app php artisan migrate --force
 
 # Clear and cache config
-echo "🧹 Clearing cache and optimizing..."
+echo "🧹 Optimizing Laravel..."
 docker-compose exec -T app php artisan config:cache
 docker-compose exec -T app php artisan route:cache
 docker-compose exec -T app php artisan view:cache
+
+# Final permission fix
+echo "🔧 Final permission adjustments..."
+docker-compose exec -T app chown -R www-data:www-data /var/www/storage
+docker-compose exec -T app chown -R www-data:www-data /var/www/bootstrap/cache
 
 # Check services status
 echo "✅ Checking services status..."
@@ -143,21 +183,33 @@ echo ""
 echo "📊 Service Status:"
 docker-compose ps
 echo ""
-echo "🌐 Your API should be available at: $(grep APP_URL .env 2>/dev/null | cut -d '=' -f2 || echo 'Check your .env file')"
+
+# Get the actual APP_URL from .env
+APP_URL=$(grep APP_URL .env 2>/dev/null | cut -d '=' -f2 || echo "http://localhost")
+echo "🌐 Your API is available at: $APP_URL"
 echo ""
-echo "� Useful Commands:"
-echo "   �📊 Check logs: docker-compose logs -f app"
+echo "🔍 Quick Health Check:"
+echo "   Test API: curl $APP_URL/api/health || curl $APP_URL"
+echo ""
+echo "🛠️ Useful Commands:"
+echo "   📊 Check logs: docker-compose logs -f app"
 echo "   📊 All logs: docker-compose logs -f"
 echo "   🔄 Update app: docker-compose pull app && docker-compose up -d app"
-echo "   🗄️  Run migrations: docker-compose exec app php artisan migrate --force"
+echo "   🗄️  Run migrations: docker-compose exec app php artisan migrate"
 echo "   🧹 Clear cache: docker-compose exec app php artisan config:clear"
 echo "   🛑 Stop all: docker-compose down"
 echo "   🔄 Restart: docker-compose restart"
+echo "   🔍 Access app shell: docker-compose exec app sh"
 echo ""
-echo "� Troubleshooting:"
+echo "🔧 Troubleshooting:"
 echo "   📝 Edit .env: nano .env"
 echo "   🔍 Check app logs: docker-compose logs app"
 echo "   🔍 Check nginx logs: docker-compose logs nginx"
-echo "   🔍 Access app shell: docker-compose exec app sh"
+echo "   🔍 Check postgres logs: docker-compose logs postgres"
 echo ""
-echo "✅ Setup complete! Your Laravel API is running in Docker containers."
+echo "🔐 Security Notes:"
+echo "   - Change default DB_PASSWORD in .env"
+echo "   - Add SSL certificate to ssl/ directory for HTTPS"
+echo "   - Configure firewall to allow only necessary ports"
+echo ""
+echo "✅ CUANKI API is now running! 🚀"
