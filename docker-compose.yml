@@ -10,6 +10,7 @@ services:
     volumes:
       - ./storage:/var/www/storage
       - ./bootstrap/cache:/var/www/bootstrap/cache
+      - cuanki_app_code:/var/www
     environment:
       - APP_NAME=CUANKI
       - APP_ENV=production
@@ -39,11 +40,10 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    volumes_from: 
-      - app
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
       - ./ssl:/etc/nginx/ssl
+      - cuanki_app_code:/var/www:ro
     depends_on:
       - app
     networks:
