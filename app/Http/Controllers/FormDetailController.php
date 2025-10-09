@@ -69,6 +69,7 @@ class FormDetailController extends Controller
 
         return response()->json([
             'status' => 'success',
+            'statu' => 'success',// hapus
             'data'   => $banks
         ]);
     }
