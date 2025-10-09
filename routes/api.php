@@ -21,7 +21,7 @@ Route::controller(GoogleController::class)->group(function () {
 // Route::get('/auth/google/callback', [GoogleController::class, 'handleGoogleCallback']);
 // Route::post('/auth/google/login', [GoogleController::class, 'loginWithGoogle']); // For mobile/API
 Route::get('/listbank', [FormDetailController::class, 'listBanks']);
-Route::get('/origins', [FormDetailController::class, 'getOriginsList']);
+Route::get('/origins', [FormDetailController::class, 'getOrigins']);
 
 Route::middleware('auth:sanctum')->group(function() {
     Route::post('/form/user', [FormDetailController::class, 'formDetailUser']);
