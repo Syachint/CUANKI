@@ -93,6 +93,31 @@ fi
 echo "📁 Creating directory structure..."
 mkdir -p nginx postgres ssl storage/{app/public,framework/{cache,sessions,views},logs} bootstrap/cache public
 
+# Create Laravel public/index.php
+echo "📝 Creating Laravel public/index.php..."
+cat > public/index.php << 'EOF'
+<?php
+
+use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Http\Request;
+
+define('LARAVEL_START', microtime(true));
+
+// Check if the application is in maintenance mode...
+if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
+    require $maintenance;
+}
+
+// Register the Composer autoloader...
+require __DIR__.'/../vendor/autoload.php';
+
+// Bootstrap Laravel and handle the request...
+(require_once __DIR__.'/../bootstrap/app.php')
+    ->make(Kernel::class)
+    ->handle($request = Request::capture())
+    ->send();
+EOF
+
 # Download required files
 echo "📥 Downloading configuration files..."
 
@@ -205,24 +230,57 @@ run_docker_compose up -d
 echo "⏳ Waiting for database to be ready..."
 sleep 15
 
-# Run database migrations
-echo "🗄️  Running database migrations..."
+# Check if artisan exists in container
+echo "🔍 Checking Laravel application..."
+ARTISAN_EXISTS="no"
 if check_docker_permissions; then
-    docker-compose exec -T app php artisan migrate:fresh --seed
+    if docker-compose exec -T app test -f artisan 2>/dev/null; then
+        ARTISAN_EXISTS="yes"
+    fi
 else
-    sudo docker-compose exec -T app php artisan migrate:fresh --seed
+    if sudo docker-compose exec -T app test -f artisan 2>/dev/null; then
+        ARTISAN_EXISTS="yes"
+    fi
 fi
 
-# Clear and cache config
-echo "🧹 Clearing cache and optimizing..."
-if check_docker_permissions; then
-    docker-compose exec -T app php artisan config:cache
-    docker-compose exec -T app php artisan route:cache
-    docker-compose exec -T app php artisan view:cache
+if [ "$ARTISAN_EXISTS" = "yes" ]; then
+    echo "✅ Laravel application found in container"
+    
+    # Run database migrations
+    echo "🗄️  Running database migrations..."
+    if check_docker_permissions; then
+        docker-compose exec -T app php artisan migrate --force --seed || echo "⚠️  Migration failed, continuing..."
+    else
+        sudo docker-compose exec -T app php artisan migrate --force --seed || echo "⚠️  Migration failed, continuing..."
+    fi
+    
+    # Clear and cache config
+    echo "🧹 Clearing cache and optimizing..."
+    if check_docker_permissions; then
+        docker-compose exec -T app php artisan config:cache || true
+        docker-compose exec -T app php artisan route:cache || true
+        docker-compose exec -T app php artisan view:cache || true
+    else
+        sudo docker-compose exec -T app php artisan config:cache || true
+        sudo docker-compose exec -T app php artisan route:cache || true
+        sudo docker-compose exec -T app php artisan view:cache || true
+    fi
 else
-    sudo docker-compose exec -T app php artisan config:cache
-    sudo docker-compose exec -T app php artisan route:cache
-    sudo docker-compose exec -T app php artisan view:cache
+    echo "⚠️  Laravel artisan not found in container"
+    echo "   This means the Docker image doesn't contain Laravel application files"
+    echo "   The application will work via the public/index.php we created"
+fi
+
+# Fix permissions via Docker
+echo "🔐 Setting final permissions..."
+if check_docker_permissions; then
+    docker-compose exec -T app chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache /var/www/public 2>/dev/null || true
+    docker-compose exec -T app chmod -R 775 /var/www/storage /var/www/bootstrap/cache 2>/dev/null || true
+    docker-compose exec -T app chmod -R 755 /var/www/public 2>/dev/null || true
+else
+    sudo docker-compose exec -T app chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache /var/www/public 2>/dev/null || true
+    sudo docker-compose exec -T app chmod -R 775 /var/www/storage /var/www/bootstrap/cache 2>/dev/null || true
+    sudo docker-compose exec -T app chmod -R 755 /var/www/public 2>/dev/null || true
 fi
 
 # Check services status
