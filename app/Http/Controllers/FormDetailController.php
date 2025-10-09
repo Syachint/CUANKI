@@ -3,15 +3,66 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Auth;
+use App\Models\Origin;
 use App\Models\User;
+use App\Models\BankData;
 use App\Models\Account;
 use App\Models\AccountAllocation;
-use App\Models\BankData;
+use App\Models\UserFinancePlan;
+use Illuminate\Support\Facades\Validator;
 
-class AccountController extends Controller
+class FormDetailController extends Controller
 {
+    function getOrigins() {
+        $origins = Origin::all();
+        return response()->json([
+            'status' => 'success',
+            'data' => $origins
+        ], 200);
+    }
+
+    function formDetailUser(Request $request)
+        {
+            $user = $request->user();
+
+            $validator = Validator::make($request->all(), [
+                'username'  => 'required|string|max:255',
+                'age'       => 'nullable|integer|min:0',
+                'origin_id' => 'nullable|integer',
+                'status'    => 'required|in:mahasiswa,pelajar',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => 'Validasi data profil gagal. Pastikan data di semua step lengkap.',
+                    'errors'  => $validator->errors()
+                ], 401);
+            }
+
+            $user->username = $request->username;
+
+            if ($request->has('age')) {
+                $user->age = $request->age;
+            }
+
+            if ($request->has('origin_id')) {
+                $user->origin_id = $request->origin_id;
+            }
+            
+            $user->status = $request->status;
+
+            $user->save();
+
+            $user->load('origin');
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Semua data profil berhasil disimpan secara lengkap (Atomic Success).',
+                'data'    => $user
+            ], 201);
+        }
+
     public function listBanks()
     {
         $banks = BankData::all(['id', 'code_name', 'bank_name']);
@@ -22,13 +73,6 @@ class AccountController extends Controller
         ]);
     }
 
-    /**
-     * Menyimpan data bank baru dan mengatur jenis alokasi di tabel account_allocation.
-     * Logika: 1 Akun = Gabungan, 2 Akun = Pecah dua, 3 Akun = Pecah tiga.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
-     */
     public function formDetailAccount(Request $request)
     {
         $user = $request->user();
@@ -113,6 +157,49 @@ class AccountController extends Controller
                 'accounts' => $accounts,
                 'allocations' => AccountAllocation::whereIn('account_id', $accountIds)->with(['account.bank'])->get()
             ]
+        ], 201);
+    }
+
+    public function formDetailPlan(Request $request)
+    {
+        $user = $request->user();
+
+        // 1. Validasi Input Pemasukan dan Tabungan
+        $validator = Validator::make($request->all(), [
+            'monthly_income'            => 'required|numeric|min:0',
+            'income_date'               => 'required|integer|min:1|max:31',
+            'saving_target_amount'      => 'required|numeric|min:0',
+            // Field Dana Darurat: nullable karena opsional
+            'emergency_target_amount'   => 'nullable|numeric|min:0', 
+            'saving_target_duration'    => 'required|integer|min:1', // Dalam tahun
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Validasi data pemasukan gagal.',
+                'errors'  => $validator->errors()
+            ], 401);
+        }
+
+        // 2. SIMPAN/UPDATE Rencana Keuangan
+        // Kalo ada, update. Kalo belum ada, bikin baru.
+        // Asumsi kolom emergency_target_amount sudah ada di tabel user_finance_plans
+        $plan = UserFinancePlan::updateOrCreate(
+            ['user_id' => $user->id],
+            [
+                'monthly_income'            => $request->monthly_income,
+                'income_date'               => $request->income_date,
+                'saving_target_amount'      => $request->saving_target_amount,
+                'saving_target_duration'    => $request->saving_target_duration,
+            ]
+        );
+        
+        // 3. Response: Mengkonfirmasi Rencana telah tersimpan
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Rencana keuangan bulanan berhasil disimpan! Alokasi saldo akan dijalankan otomatis bulan depan sesuai tanggal gajian.',
+            'data' => $plan
         ], 201);
     }
 }

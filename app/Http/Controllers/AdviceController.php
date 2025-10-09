@@ -132,7 +132,7 @@ class AdviceController extends Controller
     {
         // Gunakan origin yang tepat sesuai data user
         $location = $userData['origin'];
-        return "Act as a professional financial advisor. Based on the user's location of " . $location . " and their monthly spending money of Rp " . number_format($financeData['kebutuhan_amount'], 0, ',', '.') . ", calculate the user's approximate daily budget and compare it to the typical cost of living in " . $location . ". Provide advice on whether this monthly budget is sufficient for living in " . $location . ". The response must be a single, concise paragraph (max 100 words) in Indonesian.";
+        return "Act as a professional financial advisor. Based on the user's location of " . $location . " and their monthly spending money of Rp " . number_format($financeData['kebutuhan_amount'], 0, ',', '.') . ", calculate the user's approximate daily budget and compare it to the typical cost of living in " . $location . ". (but in indonesia i think we can expenses 45-60k per day for eating)Provide advice on whether this monthly budget is sufficient for living in " . $location . ". The response must be a single, concise paragraph (max 100 words) in Indonesian.";
     }
 
     /**

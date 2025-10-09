@@ -2,15 +2,15 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\GoogleController;
-use App\Http\Controllers\AccountController;
-use App\Http\Controllers\FinancePlanController;
 use App\Http\Controllers\AdviceController;
+use App\Http\Controllers\FormDetailController;
 
-Route::post('/register', [UserController::class, 'registerUser']);
-Route::post('/login', [UserController::class, 'loginUser']);
-Route::post('/refresh', [UserController::class, 'refreshToken']);
+Route::post('/register', [AuthController::class, 'registerUser']);
+Route::post('/login', [AuthController::class, 'loginUser']);
+Route::post('/refresh', [AuthController::class, 'refreshToken']);
 
 Route::controller(GoogleController::class)->group(function () {
     Route::get('/auth/google', 'googleLogin')->name('auth.google');
@@ -20,12 +20,15 @@ Route::controller(GoogleController::class)->group(function () {
 // Route::get('/auth/google', [GoogleController::class, 'redirectToGoogle']);
 // Route::get('/auth/google/callback', [GoogleController::class, 'handleGoogleCallback']);
 // Route::post('/auth/google/login', [GoogleController::class, 'loginWithGoogle']); // For mobile/API
-Route::get('/listbank', [AccountController::class, 'listBanks']);
+Route::get('/listbank', [FormDetailController::class, 'listBanks']);
+Route::get('/origins', [FormDetailController::class, 'getOriginsList']);
 
 Route::middleware('auth:sanctum')->group(function() {
-    Route::post('/form/user', [UserController::class, 'formDetailUser']);
-    Route::post('/form/account', [AccountController::class, 'formDetailAccount']);
-    Route::post('/form/plan', [FinancePlanController::class, 'formDetailPlan']);
+    Route::post('/form/user', [FormDetailController::class, 'formDetailUser']);
+    Route::post('/form/account', [FormDetailController::class, 'formDetailAccount']);
+    Route::post('/form/plan', [FormDetailController::class, 'formDetailPlan']);
     Route::get('/advice', [AdviceController::class, 'getAdvices']);
+    Route::get('/user-data', [UserController::class, 'getUserData']);
+    Route::get('/greeting-user', [UserController::class, 'getGreetingUser']);
     Route::post('/logout', [UserController::class, 'logout']);
 });
