@@ -69,6 +69,8 @@ services:
 volumes:
   postgres_data:
     driver: local
+  cuanki_app_code:
+    driver: local
 
 networks:
   cuanki-network:
