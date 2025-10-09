@@ -176,6 +176,8 @@ fi
 
 # Set proper permissions
 echo "🔐 Setting permissions..."
+sudo chown -R $USER:$USER .
+sudo chmod -R 755 .
 chmod -R 775 storage 2>/dev/null || sudo chmod -R 775 storage
 chmod -R 775 bootstrap/cache 2>/dev/null || sudo chmod -R 775 bootstrap/cache
 
