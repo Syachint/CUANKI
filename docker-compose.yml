@@ -26,6 +26,10 @@ services:
       - CACHE_DRIVER=file
       - QUEUE_CONNECTION=database
       - SESSION_DRIVER=file
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
       - postgres
     networks:
