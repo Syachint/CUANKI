@@ -197,11 +197,11 @@ run_docker_compose pull
 
 # Stop existing containers
 echo "🛑 Stopping existing containers..."
-run_docker_compose down
+run_docker_compose down -v
 
 # Start services
 echo "🚀 Starting services..."
-run_docker_compose up -d --force-recreate --build
+run_docker_compose up -d --build
 
 # Wait for database to be ready
 echo "⏳ Waiting for database to be ready..."
