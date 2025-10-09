@@ -201,7 +201,7 @@ run_docker_compose down
 
 # Start services
 echo "🚀 Starting services..."
-run_docker_compose up -d
+run_docker_compose up -d --force-recreate --build
 
 # Wait for database to be ready
 echo "⏳ Waiting for database to be ready..."
