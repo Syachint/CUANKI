@@ -36,6 +36,7 @@ services:
     image: nginx:alpine
     container_name: cuanki-nginx
     restart: unless-stopped
+    user: root
     ports:
       - "80:80"
       - "443:443"
