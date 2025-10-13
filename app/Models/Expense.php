@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use App\Models\User;
 use App\Models\Account;
+use App\Models\ExpenseCategories;
 
 class Expense extends Model
 {
@@ -13,15 +14,18 @@ class Expense extends Model
 
     protected $fillable = [
         'user_id',
-        'category_id',
+        'account_id',
+        'expense_category_id',
         'amount',
         'note',
-        'date',
+        'expense_date',
+        'is_manual',
+        'frequency',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
-        'date' => 'date',
+        'expense_date' => 'date',
     ];
 
     public function user()
@@ -32,5 +36,10 @@ class Expense extends Model
     public function account()
     {
         return $this->belongsTo(Account::class, 'account_id');
+    }
+
+    public function category()
+    {
+        return $this->belongsTo(ExpenseCategories::class, 'expense_category_id');
     }
 }

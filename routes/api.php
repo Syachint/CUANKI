@@ -24,6 +24,7 @@ Route::controller(GoogleController::class)->group(function () {
 // Route::post('/auth/google/login', [GoogleController::class, 'loginWithGoogle']); // For mobile/API
 Route::get('/listbank', [FormDetailController::class, 'listBanks']);
 Route::get('/origins', [FormDetailController::class, 'getOrigins']);
+Route::get('/expense-categories', [TransactionController::class, 'getExpenseCategories']);
 
 Route::middleware('auth:sanctum')->group(function() {
     // Form endpoints
@@ -34,6 +35,7 @@ Route::middleware('auth:sanctum')->group(function() {
     // Transaction endpoints
     Route::get('/user-accounts', [TransactionController::class, 'getUserAccounts']);
     Route::post('/add-income', [TransactionController::class, 'addIncome']);
+    Route::post('/add-expense', [TransactionController::class, 'addExpense']);
     
     // Other endpoints
     Route::get('/advice', [AdviceController::class, 'getAdvices']);
