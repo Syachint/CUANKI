@@ -25,8 +25,6 @@ return new class extends Migration
 
         $table->decimal('amount', 15, 2);
 
-        $table->enum('income_source', ['Gaji', 'Uang Saku', 'Uang Kaget', 'Hadiah', 'Lainnya']);
-
         $table->enum('confirmation_status', ['Pending', 'Confirmed', 'Rejected'])->default('Pending');
         $table->decimal('actual_amount', 15, 2)->nullable();
 

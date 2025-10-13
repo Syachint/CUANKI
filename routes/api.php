@@ -7,6 +7,7 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\GoogleController;
 use App\Http\Controllers\AdviceController;
 use App\Http\Controllers\FormDetailController;
+use App\Http\Controllers\TransactionController;
 
 Route::post('/register', [AuthController::class, 'registerUser']);
 Route::post('/login', [AuthController::class, 'loginUser']);
@@ -24,9 +25,16 @@ Route::get('/listbank', [FormDetailController::class, 'listBanks']);
 Route::get('/origins', [FormDetailController::class, 'getOrigins']);
 
 Route::middleware('auth:sanctum')->group(function() {
+    // Form endpoints
     Route::post('/form/user', [FormDetailController::class, 'formDetailUser']);
     Route::post('/form/account', [FormDetailController::class, 'formDetailAccount']);
     Route::post('/form/plan', [FormDetailController::class, 'formDetailPlan']);
+    
+    // Transaction endpoints
+    Route::get('/user-accounts', [TransactionController::class, 'getUserAccounts']);
+    Route::post('/add-income', [TransactionController::class, 'addIncome']);
+    
+    // Other endpoints
     Route::get('/advice', [AdviceController::class, 'getAdvices']);
     Route::get('/user-data', [UserController::class, 'getUserData']);
     Route::get('/greeting-user', [UserController::class, 'getGreetingUser']);
