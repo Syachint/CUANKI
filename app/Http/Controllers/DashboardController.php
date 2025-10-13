@@ -26,20 +26,39 @@ class DashboardController extends Controller
                 ], 404);
             }
 
-            // Get balance from accounts with type "kebutuhan" only
+            // Get today's date
+            $today = Carbon::now()->toDateString();
+            
+            // Get today's budget data from budget table
+            $todayBudgets = Budget::where('user_id', $user->id)
+                ->whereDate('created_at', $today)
+                ->get();
+
+            $dailyBudget = 0;
             $kebutuhanBalance = 0;
-            foreach ($user->accounts as $account) {
-                $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
-                if ($kebutuhanAllocation) {
-                    $kebutuhanBalance += $kebutuhanAllocation->balance_per_type;
-                }
-            }
-            
-            // Get current month details - total days in month (30 or 31)
             $daysInMonth = Carbon::now()->daysInMonth;
-            
-            // Calculate daily budget from kebutuhan balance only
-            $dailyBudget = $daysInMonth > 0 ? round($kebutuhanBalance / $daysInMonth, 0) : 0;
+
+            if ($todayBudgets->isNotEmpty()) {
+                // Get daily budget from budget table (sum from all accounts)
+                $dailyBudget = $todayBudgets->sum('daily_budget');
+                
+                // Also get kebutuhan balance for reference
+                foreach ($user->accounts as $account) {
+                    $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
+                    if ($kebutuhanAllocation) {
+                        $kebutuhanBalance += $kebutuhanAllocation->balance_per_type;
+                    }
+                }
+            } else {
+                // Fallback: calculate from kebutuhan balance if no budget exists
+                foreach ($user->accounts as $account) {
+                    $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
+                    if ($kebutuhanAllocation) {
+                        $kebutuhanBalance += $kebutuhanAllocation->balance_per_type;
+                    }
+                }
+                $dailyBudget = $daysInMonth > 0 ? round($kebutuhanBalance / $daysInMonth, 0) : 0;
+            }
 
             // Create greeting message
             $greetingMessage = "Hai, " . ($user->username ?: $user->name) . "! ini uang kamu hari ini Rp " . number_format($dailyBudget, 0, ',', '.');
@@ -56,7 +75,9 @@ class DashboardController extends Controller
                         'amount' => $dailyBudget,
                         'formatted' => 'Rp ' . number_format($dailyBudget, 0, ',', '.'),
                         'kebutuhan_balance' => $kebutuhanBalance,
-                        'days_in_month' => $daysInMonth
+                        'days_in_month' => $daysInMonth,
+                        'source' => $todayBudgets->isNotEmpty() ? 'budget_table' : 'calculated_from_kebutuhan',
+                        'budget_records_count' => $todayBudgets->count()
                     ]
                 ]
             ], 200);
