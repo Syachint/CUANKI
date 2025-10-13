@@ -4,6 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GoogleController;
 use App\Http\Controllers\AdviceController;
 use App\Http\Controllers\FormDetailController;
@@ -36,7 +37,18 @@ Route::middleware('auth:sanctum')->group(function() {
     
     // Other endpoints
     Route::get('/advice', [AdviceController::class, 'getAdvices']);
+
+    // User management endpoints
     Route::get('/user-data', [UserController::class, 'getUserData']);
-    Route::get('/greeting-user', [UserController::class, 'getGreetingUser']);
     Route::post('/logout', [UserController::class, 'logout']);
+    
+    // Dashboard endpoints
+    Route::get('/greeting-user', [DashboardController::class, 'getGreetingUser']);
+    Route::get('/goals-progress', [DashboardController::class, 'getGoalsProgress']);
+    Route::get('/today-expenses', [DashboardController::class, 'getTodayExpenses']);
+    Route::get('/daily-saving', [DashboardController::class, 'getDailySaving']);
+    Route::put('/update-account-balance', [DashboardController::class, 'updateAccountBalance']);
+    
+    // Advice endpoints
+    Route::get('/advice', [AdviceController::class, 'getAdvices']);
 });

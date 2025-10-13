@@ -16,22 +16,5 @@ use Carbon\Carbon;
 
 class UserController extends Controller
 {
-    public function getGreetingUser(Request $request)
-    {
-        $user = $request->user();
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Hai, ' . $user->username . '!'
-        ], 200);
-    }
-
-    public function getUserData(Request $request)
-    {
-        $user = $request->user();
-        $user->load('origin');
-        return response()->json([
-            'status' => 'success',
-            'data' => $user
-        ], 200);
-    }
+    
 }
