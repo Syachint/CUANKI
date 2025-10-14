@@ -13,6 +13,14 @@ use Carbon\Carbon;
 
 class TransactionController extends Controller
 {
+    /**
+     * Get current datetime with proper timezone
+     */
+    private function now()
+    {
+        return Carbon::now(config('app.timezone', 'Asia/Jakarta'));
+    }
+
     public function getUserAccounts(Request $request)
     {
         try {
@@ -354,13 +362,13 @@ class TransactionController extends Controller
     {
         try {
             // Get current month details - total days in month (30 or 31)
-            $daysInMonth = Carbon::now()->daysInMonth;
+            $daysInMonth = $this->now()->daysInMonth;
             
             // Calculate new daily budget from updated kebutuhan balance
             $newDailyBudget = $daysInMonth > 0 ? round($newKebutuhanBalance / $daysInMonth, 0) : 0;
 
             // Get today's date
-            $today = Carbon::now()->toDateString();
+            $today = $this->now()->toDateString();
             
             // Check if budget exists for today
             $existingBudget = Budget::where('user_id', $userId)
@@ -433,10 +441,10 @@ class TransactionController extends Controller
     {
         try {
             // Get current month details - total days in month (30 or 31)
-            $daysInMonth = Carbon::now()->daysInMonth;
+            $daysInMonth = $this->now()->daysInMonth;
 
             // Get today's date
-            $today = Carbon::now()->toDateString();
+            $today = $this->now()->toDateString();
             
             // Check if budget exists for today
             $existingBudget = Budget::where('user_id', $userId)

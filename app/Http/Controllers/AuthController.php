@@ -17,6 +17,14 @@ use Carbon\Carbon;
 
 class AuthController extends Controller
 {
+    /**
+     * Get current datetime with proper timezone
+     */
+    private function now()
+    {
+        return Carbon::now(config('app.timezone', 'Asia/Jakarta'));
+    }
+
     function getOriginsList() {
         $origins = Origin::all();
         return response()->json($origins);
@@ -44,11 +52,11 @@ class AuthController extends Controller
         $user = User::create($data);
 
         // Buat access token
-        $accessTokenExpiresAt = Carbon::now()->addMinutes(15);
+        $accessTokenExpiresAt = $this->now()->addMinutes(15);
         $access_token = $user->createToken('access_token', ['access-api'], $accessTokenExpiresAt)->plainTextToken;
         
         // Buat refresh token
-        $refreshTokenExpiresAt = Carbon::now()->addDays(7);
+        $refreshTokenExpiresAt = $this->now()->addDays(7);
         $refresh_token = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;
 
         return response()->json([
@@ -81,11 +89,11 @@ class AuthController extends Controller
             RefreshToken::where('user_id', $user->id)->delete();
 
             // Buat access token
-            $accessTokenExpiresAt = Carbon::now()->addMinutes(15);
+            $accessTokenExpiresAt = $this->now()->addMinutes(15);
             $access_token = $user->createToken('access_token', ['access-api'], $accessTokenExpiresAt)->plainTextToken;
             
             // Buat refresh token menggunakan Sanctum
-            $refreshTokenExpiresAt = Carbon::now()->addDays(7);
+            $refreshTokenExpiresAt = $this->now()->addDays(7);
             $refresh_token = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;
 
             return response()->json([
@@ -129,8 +137,8 @@ class AuthController extends Controller
         $refreshToken->delete();
 
         // Buat token baru
-        $accessTokenExpiresAt = Carbon::now()->addMinutes(15);
-        $refreshTokenExpiresAt = Carbon::now()->addDays(7);
+        $accessTokenExpiresAt = $this->now()->addMinutes(15);
+        $refreshTokenExpiresAt = $this->now()->addDays(7);
 
         $newAccessToken = $user->createToken('access_token', ['access-api'], $accessTokenExpiresAt)->plainTextToken;
         $newRefreshToken = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;

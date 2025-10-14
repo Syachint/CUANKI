@@ -12,6 +12,14 @@ use Carbon\Carbon;
 
 class GoogleController extends Controller
 {
+    /**
+     * Get current datetime with proper timezone
+     */
+    private function now()
+    {
+        return Carbon::now(config('app.timezone', 'Asia/Jakarta'));
+    }
+
     public function googleLogin()
     {
         return Socialite::driver('google')->stateless()->redirect();
@@ -75,11 +83,11 @@ class GoogleController extends Controller
         $user->load('origin');
         
         // Buat access token
-        $accessTokenExpiresAt = Carbon::now()->addMinutes(15);
+        $accessTokenExpiresAt = $this->now()->addMinutes(15);
         $access_token = $user->createToken('access_token', ['access-api'], $accessTokenExpiresAt)->plainTextToken;
         
         // Buat refresh token menggunakan Sanctum
-        $refreshTokenExpiresAt = Carbon::now()->addDays(7);
+        $refreshTokenExpiresAt = $this->now()->addDays(7);
         $refresh_token = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;
 
         return response()->json([
@@ -161,8 +169,8 @@ class GoogleController extends Controller
     //     $user->tokens()->delete();
         
     //     // Create new tokens
-    //     $accessTokenExpiresAt = Carbon::now()->addMinutes(15);
-    //     $refreshTokenExpiresAt = Carbon::now()->addDays(7);
+    //     $accessTokenExpiresAt = \->now()->addMinutes(15);
+    //     $refreshTokenExpiresAt = \->now()->addDays(7);
         
     //     $accessToken = $user->createToken('access_token', ['access-api'], $accessTokenExpiresAt)->plainTextToken;
     //     $refreshToken = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;

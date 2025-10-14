@@ -14,6 +14,22 @@ use Carbon\Carbon;
 
 class DashboardController extends Controller
 {
+    /**
+     * Get current datetime with proper timezone
+     */
+    private function now()
+    {
+        return Carbon::now(config('app.timezone', 'Asia/Jakarta'));
+    }
+
+    /**
+     * Create Carbon instance from date with proper timezone
+     */
+    private function carbonFromDate($year, $month, $day)
+    {
+        return Carbon::createFromDate($year, $month, $day, config('app.timezone', 'Asia/Jakarta'));
+    }
+
     public function getGreetingUser(Request $request)
     {
         try {
@@ -31,7 +47,7 @@ class DashboardController extends Controller
             $this->ensureDailyBudgetExists($userId);
 
             // Get today's budget records from database
-            $today = Carbon::now()->toDateString();
+            $today = $this->now()->toDateString();
             $todayBudgets = Budget::where('user_id', $userId)
                 ->whereDate('created_at', $today)
                 ->get();
@@ -47,7 +63,7 @@ class DashboardController extends Controller
             }
             
             // Get current month details - total days in month (30 or 31)
-            $daysInMonth = Carbon::now()->daysInMonth;
+            $daysInMonth = $this->now()->daysInMonth;
 
             // Sum daily_budget from all accounts for today
             $dailyBudget = $todayBudgets->sum('daily_budget');
@@ -163,8 +179,8 @@ class DashboardController extends Controller
             $monthlySavingNeeded = 0;
             
             if ($savingTargetDurationMonths && $savingTargetDurationMonths > 0) {
-                $targetDate = Carbon::now()->addMonths($savingTargetDurationMonths);
-                $daysRemaining = Carbon::now()->diffInDays($targetDate, false);
+                $targetDate = $this->now()->addMonths($savingTargetDurationMonths);
+                $daysRemaining = $this->now()->diffInDays($targetDate, false);
                 
                 // Calculate monthly saving needed
                 $monthlySavingNeeded = $savingTargetDurationMonths > 0 && $savingRemaining > 0 
@@ -636,7 +652,7 @@ class DashboardController extends Controller
             $this->ensureDailyBudgetExists($userId);
 
             // Get today's date
-            $today = Carbon::now()->toDateString();
+            $today = $this->now()->toDateString();
             
             // Get today's budget data from budget table
             $todayBudgets = Budget::where('user_id', $userId)
@@ -722,7 +738,7 @@ class DashboardController extends Controller
             $this->ensureDailyBudgetExists($userId);
 
             // Get today's date
-            $today = Carbon::now()->toDateString();
+            $today = $this->now()->toDateString();
             
             // Get today's budget data from budget table
             $todayBudgets = Budget::where('user_id', $userId)
@@ -777,9 +793,9 @@ class DashboardController extends Controller
             }
 
             // Get today's date in multiple formats for debugging
-            $today = Carbon::now()->toDateString(); // 2025-10-14
-            $todayStart = Carbon::now()->startOfDay(); // 2025-10-14 00:00:00
-            $todayEnd = Carbon::now()->endOfDay(); // 2025-10-14 23:59:59
+            $today = $this->now()->toDateString(); // 2025-10-14
+            $todayStart = $this->now()->startOfDay(); // 2025-10-14 00:00:00
+            $todayEnd = $this->now()->endOfDay(); // 2025-10-14 23:59:59
             
             // Debug: Check all expenses for this user first
             $allExpenses = Expense::where('user_id', $userId)->get();
@@ -855,8 +871,8 @@ class DashboardController extends Controller
             }
 
             // Get month and year from request or use current month
-            $month = $request->get('month', Carbon::now()->month);
-            $year = $request->get('year', Carbon::now()->year);
+            $month = $request->get('month', $this->now()->month);
+            $year = $request->get('year', $this->now()->year);
             
             // Validate month and year
             if ($month < 1 || $month > 12 || $year < 2020 || $year > 2030) {
@@ -867,8 +883,8 @@ class DashboardController extends Controller
             }
 
             // Create start and end dates for the month
-            $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
-            $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
+            $startDate = $this->carbonFromDate($year, $month, 1)->startOfMonth();
+            $endDate = $this->carbonFromDate($year, $month, 1)->endOfMonth();
             $daysInMonth = $startDate->daysInMonth;
             
             // Get all budgets for this month
@@ -883,11 +899,15 @@ class DashboardController extends Controller
                 ->whereMonth('expense_date', $month)
                 ->get();
 
+            // Get current date for comparison (ensure correct timezone)
+            $today = Carbon::now('Asia/Jakarta'); // Adjust timezone as needed
+            $todayString = $today->toDateString();
+            
             // Create calendar status array
             $calendarDates = [];
             
             for ($day = 1; $day <= $daysInMonth; $day++) {
-                $currentDate = Carbon::createFromDate($year, $month, $day);
+                $currentDate = $this->carbonFromDate($year, $month, $day);
                 $dateString = $currentDate->toDateString();
                 
                 // Get budget for this day
@@ -900,19 +920,28 @@ class DashboardController extends Controller
                     return Carbon::parse($expense->expense_date)->toDateString() === $currentDate->toDateString();
                 });
 
-                $totalDailyBudget = $dayBudgets->sum('daily_budget');
+                // Calculate budget values correctly
+                $totalInitialDailyBudget = $dayBudgets->sum('initial_daily_budget'); // Budget asli untuk ditampilkan
+                $totalCurrentDailyBudget = $dayBudgets->sum('daily_budget'); // Budget saat ini untuk remaining calculation
                 $totalDailyExpenses = $dayExpenses->sum('amount');
-                $isOverBudget = $totalDailyExpenses > $totalDailyBudget;
-                $isToday = $currentDate->isToday();
-                $isPast = $currentDate->isPast();
-                $isFuture = $currentDate->isFuture();
+                
+                // Over budget check menggunakan initial budget
+                $isOverBudget = $totalDailyExpenses > $totalInitialDailyBudget;
+                
+                // Remaining budget menggunakan current daily budget
+                $remainingBudget = max(0, $totalInitialDailyBudget - $totalDailyExpenses);
+                
+                // Fix date comparison - use string comparison for better accuracy
+                $isToday = $dateString === $todayString;
+                $isPast = $currentDate->lt($today->startOfDay());
+                $isFuture = $currentDate->gt($today->endOfDay());
                 
                 // Determine status
                 $status = 'normal'; // default
                 if ($isToday) {
                     $status = $isOverBudget ? 'today-overbudget' : 'today-normal';
                 } elseif ($isPast) {
-                    if ($totalDailyBudget > 0) {
+                    if ($totalInitialDailyBudget > 0) {
                         $status = $isOverBudget ? 'overbudget' : 'under-budget';
                     } else {
                         $status = 'no-budget';
@@ -929,24 +958,31 @@ class DashboardController extends Controller
                     'is_past' => $isPast,
                     'is_future' => $isFuture,
                     'status' => $status,
-                    'daily_budget' => $totalDailyBudget,
+                    'daily_budget' => $totalInitialDailyBudget, // Menggunakan initial budget untuk ditampilkan
                     'daily_expenses' => $totalDailyExpenses,
-                    'remaining_budget' => max(0, $totalDailyBudget - $totalDailyExpenses),
-                    'over_budget_amount' => $isOverBudget ? ($totalDailyExpenses - $totalDailyBudget) : 0,
+                    'remaining_budget' => $remainingBudget, // Menggunakan current budget dikurangi expenses
+                    'over_budget_amount' => $isOverBudget ? ($totalDailyExpenses - $totalInitialDailyBudget) : 0,
                     'is_over_budget' => $isOverBudget,
                     'expense_count' => $dayExpenses->count(),
                     'formatted' => [
                         'date' => $currentDate->format('d M'),
-                        'daily_budget' => 'Rp ' . number_format($totalDailyBudget, 0, ',', '.'),
+                        'daily_budget' => 'Rp ' . number_format($totalInitialDailyBudget, 0, ',', '.'), // Display initial budget
                         'daily_expenses' => 'Rp ' . number_format($totalDailyExpenses, 0, ',', '.'),
-                        'remaining_budget' => 'Rp ' . number_format(max(0, $totalDailyBudget - $totalDailyExpenses), 0, ',', '.'),
-                        'over_budget_amount' => 'Rp ' . number_format($isOverBudget ? ($totalDailyExpenses - $totalDailyBudget) : 0, 0, ',', '.')
+                        'remaining_budget' => 'Rp ' . number_format($remainingBudget, 0, ',', '.'), // Current budget - expenses
+                        'over_budget_amount' => 'Rp ' . number_format($isOverBudget ? ($totalDailyExpenses - $totalInitialDailyBudget) : 0, 0, ',', '.')
+                    ],
+                    // Debug info (will be removed after fixing)
+                    'debug' => [
+                        'current_date_string' => $dateString,
+                        'today_string' => $todayString,
+                        'is_same_date' => $dateString === $todayString
                     ]
                 ];
             }
 
             // Calculate month summary
-            $totalMonthBudget = $monthlyBudgets->sum('daily_budget');
+            $totalMonthInitialBudget = $monthlyBudgets->sum('initial_daily_budget'); // Total initial budget untuk bulan
+            $totalMonthCurrentBudget = $monthlyBudgets->sum('daily_budget'); // Total current budget untuk bulan
             $totalMonthExpenses = $monthlyExpenses->sum('amount');
             $overBudgetDaysCount = collect($calendarDates)->where('is_over_budget', true)->count();
             $daysWithExpenses = collect($calendarDates)->where('expense_count', '>', 0)->count();
@@ -960,17 +996,19 @@ class DashboardController extends Controller
                     'days_in_month' => $daysInMonth,
                     'calendar_dates' => $calendarDates,
                     'summary' => [
-                        'total_month_budget' => $totalMonthBudget,
+                        'total_month_initial_budget' => $totalMonthInitialBudget, // Total initial budget untuk display
+                        'total_month_current_budget' => $totalMonthCurrentBudget, // Total current budget untuk calculation
                         'total_month_expenses' => $totalMonthExpenses,
-                        'remaining_month_budget' => max(0, $totalMonthBudget - $totalMonthExpenses),
+                        'remaining_month_budget' => max(0, $totalMonthCurrentBudget - $totalMonthExpenses), // Remaining dari current budget
                         'over_budget_days_count' => $overBudgetDaysCount,
                         'days_with_expenses' => $daysWithExpenses,
                         'average_daily_expenses' => $daysWithExpenses > 0 ? round($totalMonthExpenses / $daysWithExpenses, 0) : 0,
                         'formatted' => [
                             'month_year' => $startDate->format('F Y'),
-                            'total_month_budget' => 'Rp ' . number_format($totalMonthBudget, 0, ',', '.'),
+                            'total_month_initial_budget' => 'Rp ' . number_format($totalMonthInitialBudget, 0, ',', '.'), // Display initial
+                            'total_month_current_budget' => 'Rp ' . number_format($totalMonthCurrentBudget, 0, ',', '.'), // Display current
                             'total_month_expenses' => 'Rp ' . number_format($totalMonthExpenses, 0, ',', '.'),
-                            'remaining_month_budget' => 'Rp ' . number_format(max(0, $totalMonthBudget - $totalMonthExpenses), 0, ',', '.'),
+                            'remaining_month_budget' => 'Rp ' . number_format(max(0, $totalMonthCurrentBudget - $totalMonthExpenses), 0, ',', '.'), // Remaining dari current
                             'over_budget_days' => $overBudgetDaysCount . ' hari',
                             'days_with_expenses' => $daysWithExpenses . ' hari'
                         ]
@@ -983,6 +1021,13 @@ class DashboardController extends Controller
                         'today-overbudget' => 'Hari ini dengan over budget',
                         'future' => 'Hari yang akan datang',
                         'no-budget' => 'Hari past tanpa budget'
+                    ],
+                    'debug_info' => [
+                        'server_today' => $todayString,
+                        'server_now' => $today->toDateTimeString(),
+                        'requested_month' => $month,
+                        'requested_year' => $year,
+                        'timezone' => config('app.timezone', 'UTC')
                     ]
                 ]
             ], 200);
@@ -1011,9 +1056,9 @@ class DashboardController extends Controller
     {
         try {
             // Get current month details - total days in month (30 or 31)
-            $daysInMonth = Carbon::now()->daysInMonth;
-            $currentYear = Carbon::now()->year;
-            $currentMonth = Carbon::now()->month;
+            $daysInMonth = $this->now()->daysInMonth;
+            $currentYear = $this->now()->year;
+            $currentMonth = $this->now()->month;
             
             // Get or calculate total kebutuhan balance for proportion calculation
             $user = User::with(['accounts.allocations'])->find($userId);
@@ -1029,7 +1074,7 @@ class DashboardController extends Controller
             $accountProportion = $totalKebutuhanBalance > 0 ? ($kebutuhanBalance / $totalKebutuhanBalance) : 0;
 
             // Get existing budget for today
-            $today = Carbon::now()->toDateString();
+            $today = $this->now()->toDateString();
             $existingBudget = Budget::where('user_id', $userId)
                 ->where('account_id', $accountId)
                 ->whereDate('created_at', $today)
@@ -1055,7 +1100,7 @@ class DashboardController extends Controller
                 $budget = $existingBudget;
             } else {
                 // Get yesterday's budget to calculate daily saving
-                $yesterday = Carbon::now()->subDay()->toDateString();
+                $yesterday = $this->now()->subDay()->toDateString();
                 $yesterdayBudget = Budget::where('user_id', $userId)
                     ->where('account_id', $accountId)
                     ->whereDate('created_at', $yesterday)
@@ -1111,8 +1156,8 @@ class DashboardController extends Controller
     private function resetMonthlyInitialBudget($userId)
     {
         try {
-            $currentYear = Carbon::now()->year;
-            $currentMonth = Carbon::now()->month;
+            $currentYear = $this->now()->year;
+            $currentMonth = $this->now()->month;
             
             // Delete existing initial budget records for this month to force recalculation
             Budget::where('user_id', $userId)
@@ -1137,9 +1182,9 @@ class DashboardController extends Controller
     private function updateMonthlyDailyBudget($userId)
     {
         try {
-            $currentYear = Carbon::now()->year;
-            $currentMonth = Carbon::now()->month;
-            $daysInMonth = Carbon::now()->daysInMonth;
+            $currentYear = $this->now()->year;
+            $currentMonth = $this->now()->month;
+            $daysInMonth = $this->now()->daysInMonth;
 
             // Get user dengan accounts dan allocations
             $user = User::with(['accounts.allocations'])->find($userId);
@@ -1193,7 +1238,7 @@ class DashboardController extends Controller
     private function ensureDailyBudgetExists($userId)
     {
         try {
-            $today = Carbon::now()->toDateString();
+            $today = $this->now()->toDateString();
             
             // Check if today's budget already exists
             $existingBudgets = Budget::where('user_id', $userId)
@@ -1223,10 +1268,10 @@ class DashboardController extends Controller
             }
 
             // Get current month details
-            $daysInMonth = Carbon::now()->daysInMonth;
-            $today = Carbon::now()->toDateString();
-            $currentYear = Carbon::now()->year;
-            $currentMonth = Carbon::now()->month;
+            $daysInMonth = $this->now()->daysInMonth;
+            $today = $this->now()->toDateString();
+            $currentYear = $this->now()->year;
+            $currentMonth = $this->now()->month;
 
             // Get or calculate initial daily budget (only set once per month)
             $monthlyInitialBudget = $this->getOrSetMonthlyInitialBudget($userId, $currentYear, $currentMonth);
@@ -1320,7 +1365,7 @@ class DashboardController extends Controller
             }
 
             // Calculate initial daily budget for this month
-            $daysInMonth = Carbon::createFromDate($year, $month, 1)->daysInMonth;
+            $daysInMonth = $this->carbonFromDate($year, $month, 1)->daysInMonth;
             $initialDailyBudget = $daysInMonth > 0 ? round($totalKebutuhanBalance / $daysInMonth, 0) : 0;
 
             \Log::info("Set new monthly initial budget for user {$userId}, {$year}-{$month}: {$initialDailyBudget}");
@@ -1352,7 +1397,7 @@ class DashboardController extends Controller
             $this->generateDailyBudget($user->id);
 
             // Get generated budgets
-            $today = Carbon::now()->toDateString();
+            $today = $this->now()->toDateString();
             $todayBudgets = Budget::where('user_id', $user->id)
                 ->whereDate('created_at', $today)
                 ->with('account')
@@ -1380,7 +1425,7 @@ class DashboardController extends Controller
                             ]
                         ];
                     }),
-                    'generated_at' => Carbon::now()->toDateTimeString()
+                    'generated_at' => $this->now()->toDateTimeString()
                 ]
             ], 200);
 
@@ -1412,7 +1457,7 @@ class DashboardController extends Controller
             $this->ensureDailyBudgetExists($userId);
 
             // Get today's budget records
-            $today = Carbon::now()->toDateString();
+            $today = $this->now()->toDateString();
             $todayBudgets = Budget::where('user_id', $userId)
                 ->whereDate('created_at', $today)
                 ->with('account')
@@ -1473,5 +1518,42 @@ class DashboardController extends Controller
                 'message' => 'Error retrieving budget comparison: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    public function timezoneTest(Request $request)
+    {
+        $now = $this->now();
+        $utcNow = \Carbon\Carbon::now('UTC');
+        $configTimezone = config('app.timezone');
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Timezone test data',
+            'data' => [
+                'config_timezone' => $configTimezone,
+                'jakarta_time' => [
+                    'datetime' => $now->format('Y-m-d H:i:s T'),
+                    'date' => $now->toDateString(),
+                    'timestamp' => $now->timestamp,
+                    'timezone' => $now->timezone->getName()
+                ],
+                'utc_time' => [
+                    'datetime' => $utcNow->format('Y-m-d H:i:s T'),
+                    'date' => $utcNow->toDateString(),
+                    'timestamp' => $utcNow->timestamp,
+                    'timezone' => $utcNow->timezone->getName()
+                ],
+                'difference_hours' => $now->diffInHours($utcNow),
+                'is_october_15' => $now->toDateString() === '2025-10-15',
+                'current_date_check' => $now->format('Y-m-d') === '2025-10-15' ? 'Correct! Today is October 15' : 'Wrong! Should be October 15',
+                'debug_info' => [
+                    'day' => $now->day,
+                    'month' => $now->month,
+                    'year' => $now->year,
+                    'day_name' => $now->dayName,
+                    'hour' => $now->hour
+                ]
+            ]
+        ]);
     }
 }
