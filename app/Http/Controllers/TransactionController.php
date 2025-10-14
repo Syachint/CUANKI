@@ -644,4 +644,159 @@ class TransactionController extends Controller
             ], 500);
         }
     }
+
+    public function getDetailReceiptIncomes(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $userId = $user->id;
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ], 404);
+            }
+
+            // Get date parameter from request, default to today
+            $requestDate = $request->get('date', $this->now()->toDateString());
+            
+            // Validate and parse the date
+            try {
+                $targetDate = Carbon::createFromFormat('Y-m-d', $requestDate, 'Asia/Jakarta');
+                $targetDateString = $targetDate->toDateString();
+                $targetDateStart = $targetDate->startOfDay();
+                $targetDateEnd = $targetDate->endOfDay();
+            } catch (\Exception $e) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Invalid date format. Please use YYYY-MM-DD format.'
+                ], 400);
+            }
+
+            // Get incomes for the target date with detailed information
+            $incomes = Income::where('user_id', $userId)
+                ->where(function($query) use ($targetDateString, $targetDateStart, $targetDateEnd) {
+                    $query->whereDate('received_date', $targetDateString)
+                          ->orWhereBetween('created_at', [$targetDateStart, $targetDateEnd]);
+                })
+                ->with([
+                    'account.bank:id,code_name,bank_name'
+                ])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            // Calculate total incomes
+            $totalIncomes = $incomes->sum('amount');
+            $incomeCount = $incomes->count();
+
+            // Format detailed incomes list
+            $detailIncomes = $incomes->map(function ($income) {
+                $createdAt = Carbon::parse($income->created_at)->setTimezone('Asia/Jakarta');
+                $receivedDate = Carbon::parse($income->received_date)->setTimezone('Asia/Jakarta');
+                
+                return [
+                    'income_id' => $income->id,
+                    'income_source' => $income->income_source ?? 'Lainnya',
+                    'note' => $income->note ?? '',
+                    'amount' => $income->amount,
+                    'actual_amount' => $income->actual_amount,
+                    'received_date' => $receivedDate->toDateString(),
+                    'received_time' => $createdAt->format('H:i:s'),
+                    'frequency' => $income->frequency ?? 'Sekali',
+                    'confirmation_status' => $income->confirmation_status ?? 'Pending',
+                    'is_manual' => $income->is_manual ?? false,
+                    'to_bank' => [
+                        'code_name' => $income->account->bank->code_name ?? 'Unknown Bank',
+                        'bank_name' => $income->account->bank->bank_name ?? 'Unknown Bank',
+                        'account_id' => $income->account_id
+                    ],
+                    'timestamps' => [
+                        'created_at' => $createdAt->format('Y-m-d H:i:s'),
+                        'received_date_full' => $receivedDate->format('Y-m-d H:i:s')
+                    ],
+                    'formatted' => [
+                        'amount' => 'Rp ' . number_format($income->amount, 0, ',', '.'),
+                        'actual_amount' => $income->actual_amount ? 'Rp ' . number_format($income->actual_amount, 0, ',', '.') : null,
+                        'received_date' => $receivedDate->format('d M Y'),
+                        'received_time' => $createdAt->format('H:i'),
+                        'received_datetime' => $receivedDate->format('d M Y') . ' ' . $createdAt->format('H:i'),
+                        'confirmation_status' => ucfirst($income->confirmation_status ?? 'Pending'),
+                        'frequency' => $income->frequency ?? 'Sekali',
+                        'income_source' => $income->income_source ?? 'Lainnya'
+                    ]
+                ];
+            });
+
+            // Get date navigation info (previous/next dates with incomes)
+            $previousIncomeDate = Income::where('user_id', $userId)
+                ->whereDate('received_date', '<', $targetDateString)
+                ->orderBy('received_date', 'desc')
+                ->first();
+                
+            $nextIncomeDate = Income::where('user_id', $userId)
+                ->whereDate('received_date', '>', $targetDateString)
+                ->orderBy('received_date', 'asc')
+                ->first();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Detail receipt incomes retrieved successfully',
+                'data' => [
+                    'target_date' => $targetDateString,
+                    'date_info' => [
+                        'date' => $targetDateString,
+                        'day_name' => $targetDate->format('l'),
+                        'formatted_date' => $targetDate->format('d M Y'),
+                        'is_today' => $targetDateString === $this->now()->toDateString(),
+                        'is_past' => $targetDate->lt($this->now()->startOfDay()),
+                        'is_future' => $targetDate->gt($this->now()->endOfDay())
+                    ],
+                    'summary' => [
+                        'total_incomes' => $totalIncomes,
+                        'income_count' => $incomeCount,
+                        'average_per_income' => $incomeCount > 0 ? round($totalIncomes / $incomeCount, 0) : 0,
+                        'confirmed_incomes' => $incomes->where('confirmation_status', 'Confirmed')->count(),
+                        'pending_incomes' => $incomes->where('confirmation_status', 'Pending')->count(),
+                        'manual_incomes' => $incomes->where('is_manual', true)->count(),
+                        'formatted' => [
+                            'total_incomes' => 'Rp ' . number_format($totalIncomes, 0, ',', '.'),
+                            'income_count' => $incomeCount . ' transaksi',
+                            'average_per_income' => 'Rp ' . number_format($incomeCount > 0 ? round($totalIncomes / $incomeCount, 0) : 0, 0, ',', '.'),
+                            'confirmed_incomes' => $incomes->where('confirmation_status', 'Confirmed')->count() . ' terkonfirmasi',
+                            'pending_incomes' => $incomes->where('confirmation_status', 'Pending')->count() . ' pending'
+                        ]
+                    ],
+                    'incomes' => $detailIncomes,
+                    'navigation' => [
+                        'previous_date' => $previousIncomeDate ? Carbon::parse($previousIncomeDate->received_date)->toDateString() : null,
+                        'next_date' => $nextIncomeDate ? Carbon::parse($nextIncomeDate->received_date)->toDateString() : null,
+                        'has_previous' => $previousIncomeDate !== null,
+                        'has_next' => $nextIncomeDate !== null,
+                        'formatted' => [
+                            'previous_date' => $previousIncomeDate ? Carbon::parse($previousIncomeDate->received_date)->format('d M Y') : null,
+                            'next_date' => $nextIncomeDate ? Carbon::parse($nextIncomeDate->received_date)->format('d M Y') : null
+                        ]
+                    ],
+                    'debug_info' => [
+                        'requested_date' => $requestDate,
+                        'target_date' => $targetDateString,
+                        'query_date_start' => $targetDateStart->format('Y-m-d H:i:s'),
+                        'query_date_end' => $targetDateEnd->format('Y-m-d H:i:s'),
+                        'timezone' => 'Asia/Jakarta'
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error retrieving detail receipt incomes: ' . $e->getMessage(),
+                'debug' => [
+                    'requested_date' => $request->get('date', 'today'),
+                    'user_id' => $user->id ?? 'unknown'
+                ]
+            ], 500);
+        }
+    }
 }
