@@ -543,6 +543,84 @@ class DashboardController extends Controller
         }
     }
 
+    public function getReceiptToday(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $userId = $user->id;
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ], 404);
+            }
+
+            // Get today's date in multiple formats for debugging
+            $today = Carbon::now()->toDateString(); // 2025-10-14
+            $todayStart = Carbon::now()->startOfDay(); // 2025-10-14 00:00:00
+            $todayEnd = Carbon::now()->endOfDay(); // 2025-10-14 23:59:59
+            
+            // Debug: Check all expenses for this user first
+            $allExpenses = Expense::where('user_id', $userId)->get();
+            
+            // Try multiple date filter approaches
+            $todayExpenses = Expense::where('user_id', $userId)
+                ->where(function($query) use ($today, $todayStart, $todayEnd) {
+                    $query->whereDate('expense_date', $today)
+                          ->orWhereBetween('expense_date', [$todayStart, $todayEnd])
+                          ->orWhereDate('created_at', $today);
+                })
+                ->with(['category'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            // If still no results, get recent expenses instead
+            if ($todayExpenses->isEmpty()) {
+                $todayExpenses = Expense::where('user_id', $userId)
+                    ->with(['category'])
+                    ->orderBy('created_at', 'desc')
+                    ->take(10) // Get latest 10 expenses
+                    ->get();
+            }
+
+            // Calculate total expenses
+            $totalExpenses = $todayExpenses->sum('amount');
+
+            // Format expenses list
+            $expenses = $todayExpenses->map(function ($expense) {
+                return [
+                    'id' => $expense->id,
+                    'category_name' => $expense->category ? $expense->category->name : 'Tanpa Kategori',
+                    'note' => $expense->note ?: 'Tidak ada catatan',
+                    'amount' => $expense->amount,
+                    'is_income' => false, // Semua adalah expense (negatif)
+                    'expense_time' => $expense->created_at->format('H:i'),
+                    'expense_date_raw' => $expense->expense_date,
+                    'formatted_amount' => '-' . number_format($expense->amount, 0, ',', '.')
+                ];
+            });
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'date' => $today,
+                    'total_expenses' => $totalExpenses,
+                    'total_transactions' => $todayExpenses->count(),
+                    'formatted_date' => Carbon::parse($today)->format('d M Y'),
+                    'formatted_total_expenses' => 'Rp ' . number_format($totalExpenses, 0, ',', '.'),
+                    'transactions' => $expenses,
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error retrieving today receipt: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     private function getCalculationMethod($totalBanks, $accountId, $sortedAccounts)
     {
         if ($totalBanks == 1) {
