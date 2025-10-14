@@ -841,6 +841,160 @@ class DashboardController extends Controller
         }
     }
 
+    public function getCalendarStatus(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $userId = $user->id;
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ], 404);
+            }
+
+            // Get month and year from request or use current month
+            $month = $request->get('month', Carbon::now()->month);
+            $year = $request->get('year', Carbon::now()->year);
+            
+            // Validate month and year
+            if ($month < 1 || $month > 12 || $year < 2020 || $year > 2030) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Invalid month or year parameter'
+                ], 400);
+            }
+
+            // Create start and end dates for the month
+            $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
+            $endDate = Carbon::createFromDate($year, $month, 1)->endOfMonth();
+            $daysInMonth = $startDate->daysInMonth;
+            
+            // Get all budgets for this month
+            $monthlyBudgets = Budget::where('user_id', $userId)
+                ->whereYear('created_at', $year)
+                ->whereMonth('created_at', $month)
+                ->get();
+
+            // Get all expenses for this month
+            $monthlyExpenses = Expense::where('user_id', $userId)
+                ->whereYear('expense_date', $year)
+                ->whereMonth('expense_date', $month)
+                ->get();
+
+            // Create calendar status array
+            $calendarDates = [];
+            
+            for ($day = 1; $day <= $daysInMonth; $day++) {
+                $currentDate = Carbon::createFromDate($year, $month, $day);
+                $dateString = $currentDate->toDateString();
+                
+                // Get budget for this day
+                $dayBudgets = $monthlyBudgets->filter(function ($budget) use ($currentDate) {
+                    return Carbon::parse($budget->created_at)->toDateString() === $currentDate->toDateString();
+                });
+                
+                // Get expenses for this day
+                $dayExpenses = $monthlyExpenses->filter(function ($expense) use ($currentDate) {
+                    return Carbon::parse($expense->expense_date)->toDateString() === $currentDate->toDateString();
+                });
+
+                $totalDailyBudget = $dayBudgets->sum('daily_budget');
+                $totalDailyExpenses = $dayExpenses->sum('amount');
+                $isOverBudget = $totalDailyExpenses > $totalDailyBudget;
+                $isToday = $currentDate->isToday();
+                $isPast = $currentDate->isPast();
+                $isFuture = $currentDate->isFuture();
+                
+                // Determine status
+                $status = 'normal'; // default
+                if ($isToday) {
+                    $status = $isOverBudget ? 'today-overbudget' : 'today-normal';
+                } elseif ($isPast) {
+                    if ($totalDailyBudget > 0) {
+                        $status = $isOverBudget ? 'overbudget' : 'under-budget';
+                    } else {
+                        $status = 'no-budget';
+                    }
+                } else {
+                    $status = 'future';
+                }
+
+                $calendarDates[] = [
+                    'date' => $dateString,
+                    'day' => $day,
+                    'day_name' => $currentDate->format('D'), // Mon, Tue, etc
+                    'is_today' => $isToday,
+                    'is_past' => $isPast,
+                    'is_future' => $isFuture,
+                    'status' => $status,
+                    'daily_budget' => $totalDailyBudget,
+                    'daily_expenses' => $totalDailyExpenses,
+                    'remaining_budget' => max(0, $totalDailyBudget - $totalDailyExpenses),
+                    'over_budget_amount' => $isOverBudget ? ($totalDailyExpenses - $totalDailyBudget) : 0,
+                    'is_over_budget' => $isOverBudget,
+                    'expense_count' => $dayExpenses->count(),
+                    'formatted' => [
+                        'date' => $currentDate->format('d M'),
+                        'daily_budget' => 'Rp ' . number_format($totalDailyBudget, 0, ',', '.'),
+                        'daily_expenses' => 'Rp ' . number_format($totalDailyExpenses, 0, ',', '.'),
+                        'remaining_budget' => 'Rp ' . number_format(max(0, $totalDailyBudget - $totalDailyExpenses), 0, ',', '.'),
+                        'over_budget_amount' => 'Rp ' . number_format($isOverBudget ? ($totalDailyExpenses - $totalDailyBudget) : 0, 0, ',', '.')
+                    ]
+                ];
+            }
+
+            // Calculate month summary
+            $totalMonthBudget = $monthlyBudgets->sum('daily_budget');
+            $totalMonthExpenses = $monthlyExpenses->sum('amount');
+            $overBudgetDaysCount = collect($calendarDates)->where('is_over_budget', true)->count();
+            $daysWithExpenses = collect($calendarDates)->where('expense_count', '>', 0)->count();
+
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'month' => $month,
+                    'year' => $year,
+                    'month_name' => $startDate->format('F'),
+                    'days_in_month' => $daysInMonth,
+                    'calendar_dates' => $calendarDates,
+                    'summary' => [
+                        'total_month_budget' => $totalMonthBudget,
+                        'total_month_expenses' => $totalMonthExpenses,
+                        'remaining_month_budget' => max(0, $totalMonthBudget - $totalMonthExpenses),
+                        'over_budget_days_count' => $overBudgetDaysCount,
+                        'days_with_expenses' => $daysWithExpenses,
+                        'average_daily_expenses' => $daysWithExpenses > 0 ? round($totalMonthExpenses / $daysWithExpenses, 0) : 0,
+                        'formatted' => [
+                            'month_year' => $startDate->format('F Y'),
+                            'total_month_budget' => 'Rp ' . number_format($totalMonthBudget, 0, ',', '.'),
+                            'total_month_expenses' => 'Rp ' . number_format($totalMonthExpenses, 0, ',', '.'),
+                            'remaining_month_budget' => 'Rp ' . number_format(max(0, $totalMonthBudget - $totalMonthExpenses), 0, ',', '.'),
+                            'over_budget_days' => $overBudgetDaysCount . ' hari',
+                            'days_with_expenses' => $daysWithExpenses . ' hari'
+                        ]
+                    ],
+                    'legend' => [
+                        'normal' => 'Hari normal (tidak ada data)',
+                        'under-budget' => 'Hari past dengan budget cukup',
+                        'overbudget' => 'Hari past dengan over budget',
+                        'today-normal' => 'Hari ini dengan budget cukup',
+                        'today-overbudget' => 'Hari ini dengan over budget',
+                        'future' => 'Hari yang akan datang',
+                        'no-budget' => 'Hari past tanpa budget'
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error retrieving calendar status: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
     private function getCalculationMethod($totalBanks, $accountId, $sortedAccounts)
     {
         if ($totalBanks == 1) {
