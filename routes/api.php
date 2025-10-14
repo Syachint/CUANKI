@@ -45,10 +45,12 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::post('/logout', [UserController::class, 'logout']);
     
     // Dashboard endpoints
-    Route::get('/greeting-users', [DashboardController::class, 'getGreetingUser']);
+    Route::post('/add-new-account', [DashboardController::class, 'addNewAccount']);
+    Route::get('/greeting-user', [DashboardController::class, 'getGreetingUser']);
     Route::get('/goals-progress', [DashboardController::class, 'getGoalsProgress']);
     Route::get('/today-expenses', [DashboardController::class, 'getTodayExpenses']);
     Route::get('/daily-saving', [DashboardController::class, 'getDailySaving']);
+    Route::get('/receipt-today', [DashboardController::class, 'getReceiptToday']);
     Route::get('/budget-comparison', [DashboardController::class, 'getBudgetComparison']);
     Route::put('/update-account-balance', [DashboardController::class, 'updateAccountBalance']);
     Route::post('/generate-today-budget', [DashboardController::class, 'generateTodayBudget']);
