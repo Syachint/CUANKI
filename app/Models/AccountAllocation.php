@@ -14,10 +14,12 @@ class AccountAllocation extends Model
         'account_id',
         'type',
         'balance_per_type',
+        'allocation_date',
     ];
 
     protected $casts = [
         'balance_per_type' => 'decimal:2',
+        'allocation_date' => 'date',
     ];
 
     public function user()

@@ -9,6 +9,7 @@ use App\Http\Controllers\GoogleController;
 use App\Http\Controllers\AdviceController;
 use App\Http\Controllers\FormDetailController;
 use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\GoalController;
 
 Route::post('/register', [AuthController::class, 'registerUser']);
 Route::post('/login', [AuthController::class, 'loginUser']);
@@ -58,7 +59,11 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/budget-comparison', [DashboardController::class, 'getBudgetComparison']);
     Route::put('/update-account-balance', [DashboardController::class, 'updateAccountBalance']);
     Route::post('/generate-today-budget', [DashboardController::class, 'generateTodayBudget']);
-    
+
+    // Goal endpoints
+    Route::get('/goal-graphic-rate', [GoalController::class, 'getGoalGraphicRate']);
+    Route::get('/goal-graphic-rate?period={period}', [GoalController::class, 'getGoalGraphicRate']);
+
     // Advice endpoints
     Route::get('/advice', [AdviceController::class, 'getAdvices']);
 });
