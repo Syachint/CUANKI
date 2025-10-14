@@ -51,6 +51,7 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/today-expenses', [DashboardController::class, 'getTodayExpenses']);
     Route::get('/daily-saving', [DashboardController::class, 'getDailySaving']);
     Route::get('/receipt-today', [DashboardController::class, 'getReceiptToday']);
+    Route::get('/detail-receipt-expense', [TransactionController::class, 'getDetailReceiptExpense']);
     Route::get('/calendar-status', [DashboardController::class, 'getCalendarStatus']);
     Route::get('/timezone-test', [DashboardController::class, 'timezoneTest']);
     Route::get('/budget-comparison', [DashboardController::class, 'getBudgetComparison']);

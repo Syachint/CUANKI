@@ -497,4 +497,151 @@ class TransactionController extends Controller
             ];
         }
     }
+
+    public function getDetailReceiptExpense(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $userId = $user->id;
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ], 404);
+            }
+
+            // Get date parameter from request, default to today
+            $requestDate = $request->get('date', $this->now()->toDateString());
+            
+            // Validate and parse the date
+            try {
+                $targetDate = Carbon::createFromFormat('Y-m-d', $requestDate, 'Asia/Jakarta');
+                $targetDateString = $targetDate->toDateString();
+                $targetDateStart = $targetDate->startOfDay();
+                $targetDateEnd = $targetDate->endOfDay();
+            } catch (\Exception $e) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Invalid date format. Please use YYYY-MM-DD format.'
+                ], 400);
+            }
+
+            // Get expenses for the target date with detailed information
+            $expenses = Expense::where('user_id', $userId)
+                ->where(function($query) use ($targetDateString, $targetDateStart, $targetDateEnd) {
+                    $query->whereDate('expense_date', $targetDateString)
+                          ->orWhereBetween('created_at', [$targetDateStart, $targetDateEnd]);
+                })
+                ->with([
+                    'category:id,name',
+                    'account.bank:id,code_name,bank_name'
+                ])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            // Calculate total expenses
+            $totalExpenses = $expenses->sum('amount');
+            $expenseCount = $expenses->count();
+
+            // Format detailed expenses list
+            $detailExpenses = $expenses->map(function ($expense) {
+                $createdAt = Carbon::parse($expense->created_at)->setTimezone('Asia/Jakarta');
+                $expenseDate = Carbon::parse($expense->expense_date)->setTimezone('Asia/Jakarta');
+                
+                return [
+                    'expense_id' => $expense->id,
+                    'category' => [
+                        'id' => $expense->category->id ?? null,
+                        'name' => $expense->category->name ?? 'Unknown Category',
+                        'note' => $expense->category->note ?? null
+                    ],
+                    'note' => $expense->note ?? '',
+                    'amount' => $expense->amount,
+                    'expense_date' => $expenseDate->toDateString(),
+                    'expense_time' => $createdAt->format('H:i:s'),
+                    'from_bank' => [
+                        'code_name' => $expense->account->bank->code_name ?? 'Unknown Bank',
+                        'bank_name' => $expense->account->bank->bank_name ?? 'Unknown Bank',
+                        'account_id' => $expense->account_id
+                    ],
+                    'timestamps' => [
+                        'created_at' => $createdAt->format('Y-m-d H:i:s'),
+                        'expense_date_full' => $expenseDate->format('Y-m-d H:i:s')
+                    ],
+                    'formatted' => [
+                        'amount' => 'Rp ' . number_format($expense->amount, 0, ',', '.'),
+                        'expense_date' => $expenseDate->format('d M Y'),
+                        'expense_time' => $createdAt->format('H:i'),
+                        'expense_datetime' => $expenseDate->format('d M Y') . ' ' . $createdAt->format('H:i')
+                    ]
+                ];
+            });
+
+            // Get date navigation info (previous/next dates with expenses)
+            $previousExpenseDate = Expense::where('user_id', $userId)
+                ->whereDate('expense_date', '<', $targetDateString)
+                ->orderBy('expense_date', 'desc')
+                ->first();
+                
+            $nextExpenseDate = Expense::where('user_id', $userId)
+                ->whereDate('expense_date', '>', $targetDateString)
+                ->orderBy('expense_date', 'asc')
+                ->first();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Detail receipt expenses retrieved successfully',
+                'data' => [
+                    'target_date' => $targetDateString,
+                    'date_info' => [
+                        'date' => $targetDateString,
+                        'day_name' => $targetDate->format('l'),
+                        'formatted_date' => $targetDate->format('d M Y'),
+                        'is_today' => $targetDateString === $this->now()->toDateString(),
+                        'is_past' => $targetDate->lt($this->now()->startOfDay()),
+                        'is_future' => $targetDate->gt($this->now()->endOfDay())
+                    ],
+                    'summary' => [
+                        'total_expenses' => $totalExpenses,
+                        'expense_count' => $expenseCount,
+                        'average_per_expense' => $expenseCount > 0 ? round($totalExpenses / $expenseCount, 0) : 0,
+                        'formatted' => [
+                            'total_expenses' => 'Rp ' . number_format($totalExpenses, 0, ',', '.'),
+                            'expense_count' => $expenseCount . ' transaksi',
+                            'average_per_expense' => 'Rp ' . number_format($expenseCount > 0 ? round($totalExpenses / $expenseCount, 0) : 0, 0, ',', '.')
+                        ]
+                    ],
+                    'expenses' => $detailExpenses,
+                    'navigation' => [
+                        'previous_date' => $previousExpenseDate ? Carbon::parse($previousExpenseDate->expense_date)->toDateString() : null,
+                        'next_date' => $nextExpenseDate ? Carbon::parse($nextExpenseDate->expense_date)->toDateString() : null,
+                        'has_previous' => $previousExpenseDate !== null,
+                        'has_next' => $nextExpenseDate !== null,
+                        'formatted' => [
+                            'previous_date' => $previousExpenseDate ? Carbon::parse($previousExpenseDate->expense_date)->format('d M Y') : null,
+                            'next_date' => $nextExpenseDate ? Carbon::parse($nextExpenseDate->expense_date)->format('d M Y') : null
+                        ]
+                    ],
+                    'debug_info' => [
+                        'requested_date' => $requestDate,
+                        'target_date' => $targetDateString,
+                        'query_date_start' => $targetDateStart->format('Y-m-d H:i:s'),
+                        'query_date_end' => $targetDateEnd->format('Y-m-d H:i:s'),
+                        'timezone' => 'Asia/Jakarta'
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error retrieving detail receipt expenses: ' . $e->getMessage(),
+                'debug' => [
+                    'requested_date' => $request->get('date', 'today'),
+                    'user_id' => $user->id ?? 'unknown'
+                ]
+            ], 500);
+        }
+    }
 }
