@@ -7,6 +7,8 @@ use App\Models\MonthlyExpense;
 use App\Models\ExpenseCategories;
 use App\Models\Budget;
 use App\Models\AccountAllocation;
+use App\Models\Account;
+use App\Models\Expense;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -363,11 +365,43 @@ class MonthlyExpenseController extends Controller
 
             DB::beginTransaction();
 
-            // Update monthly expense amounts
+            // 1. Update monthly expense amounts
             $monthlyExpense->addExpense($expenseAmount);
 
-            // Create expense record for tracking (optional)
-            // You can add this to expenses table with frequency 'monthly' if needed for detailed tracking
+            // 2. Get account_id dari kebutuhan allocation untuk expense record
+            $kebutuhanAllocations = AccountAllocation::whereHas('account', function ($query) use ($user) {
+                $query->where('user_id', $user->id);
+            })
+            ->where('type', 'Kebutuhan')
+            ->whereDate('allocation_date', $this->now()->toDateString())
+            ->get();
+
+            if ($kebutuhanAllocations->isEmpty()) {
+                throw new \Exception('No Kebutuhan allocation found for today. Please setup your accounts first.');
+            }
+
+            $firstKebutuhanAllocation = $kebutuhanAllocations->first();
+
+            // 3. Create expense record untuk tracking (masuk ke TodayReceipt & DetailReceiptExpense)
+            $expenseRecord = Expense::create([
+                'user_id' => $user->id,
+                'account_id' => $firstKebutuhanAllocation->account_id,
+                'expense_category_id' => $monthlyExpense->expense_category_id,
+                'amount' => $expenseAmount,
+                'note' => $request->note ?: 'Monthly budget usage: ' . $monthlyExpense->category->name,
+                'expense_date' => $this->now()->toDateString(),
+                'frequency' => 'Bulanan',
+                'is_manual' => true
+            ]);
+
+            // 4. Update balance_per_type untuk tipe Kebutuhan
+            $firstKebutuhanAllocation->balance_per_type -= $expenseAmount;
+            $firstKebutuhanAllocation->save();
+
+            // 5. Update current_balance di account yang bersangkutan
+            $account = $firstKebutuhanAllocation->account;
+            $account->current_balance -= $expenseAmount;
+            $account->save();
 
             DB::commit();
 
@@ -434,14 +468,24 @@ class MonthlyExpenseController extends Controller
         $availableForDaily = $totalKebutuhanBalance - $totalMonthlyExpenses;
         $newDailyBudget = $availableForDaily > 0 ? $this->roundCurrency($availableForDaily / $daysInMonth) : 0;
 
-        // Update budget table
+        // Update budget table - both daily_budget dan initial_daily_budget
         $budget = Budget::where('user_id', $userId)
             ->whereDate('updated_at', $now->toDateString())
             ->first();
 
         if ($budget) {
             $budget->daily_budget = $newDailyBudget;
+            $budget->initial_daily_budget = $newDailyBudget; // Update initial juga
             $budget->save();
+        } else {
+            // Create budget record if not exists
+            Budget::create([
+                'user_id' => $userId,
+                'daily_budget' => $newDailyBudget,
+                'initial_daily_budget' => $newDailyBudget,
+                'daily_saving' => 0,
+                'date' => $now->toDateString()
+            ]);
         }
 
         return $newDailyBudget;

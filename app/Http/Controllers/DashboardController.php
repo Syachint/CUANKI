@@ -469,7 +469,7 @@ class DashboardController extends Controller
             $todayStart = $this->now()->startOfDay();
             $todayEnd = $this->now()->endOfDay();
             
-            // Get today's expenses with category and account info
+            // Get today's expenses with category and account info (include monthly expenses)
             $todayExpenses = Expense::where('user_id', $userId)
                 ->where(function($query) use ($today, $todayStart, $todayEnd) {
                     $query->whereDate('expense_date', $today)
@@ -497,6 +497,7 @@ class DashboardController extends Controller
 
             // Format expenses list with created_at timestamp for sorting
             $expenseTransactions = $todayExpenses->map(function ($expense) {
+                $isMonthlyExpense = $expense->frequency === 'Bulanan';
                 return [
                     'id' => $expense->id,
                     'category_name' => $expense->category ? $expense->category->name : 'Tanpa Kategori',
@@ -506,6 +507,8 @@ class DashboardController extends Controller
                     'expense_time' => $expense->created_at->format('H:i'),
                     'expense_date_raw' => $expense->expense_date,
                     'formatted_amount' => '-' . number_format($expense->amount, 0, ',', '.'),
+                    'is_monthly_expense' => $isMonthlyExpense,
+                    'expense_type' => $isMonthlyExpense ? 'Monthly Budget' : 'Regular',
                     'created_at_timestamp' => $expense->created_at->timestamp
                 ];
             });

@@ -461,7 +461,7 @@ class TransactionController extends Controller
                 ], 400);
             }
 
-            // Get expenses for the target date with detailed information
+            // Get expenses for the target date with detailed information (include monthly expenses)
             $expenses = Expense::where('user_id', $userId)
                 ->where(function($query) use ($targetDateString, $targetDateStart, $targetDateEnd) {
                     $query->whereDate('expense_date', $targetDateString)
@@ -482,6 +482,7 @@ class TransactionController extends Controller
             $detailExpenses = $expenses->map(function ($expense) {
                 $createdAt = Carbon::parse($expense->created_at)->setTimezone('Asia/Jakarta');
                 $expenseDate = Carbon::parse($expense->expense_date)->setTimezone('Asia/Jakarta');
+                $isMonthlyExpense = $expense->frequency === 'monthly';
                 
                 return [
                     'expense_id' => $expense->id,
@@ -494,6 +495,9 @@ class TransactionController extends Controller
                     'amount' => $expense->amount,
                     'expense_date' => $expenseDate->toDateString(),
                     'expense_time' => $createdAt->format('H:i:s'),
+                    'expense_type' => $isMonthlyExpense ? 'Monthly Budget' : 'Regular',
+                    'is_monthly_expense' => $isMonthlyExpense,
+                    'frequency' => $expense->frequency,
                     'from_bank' => [
                         'code_name' => $expense->account->bank->code_name ?? 'Unknown Bank',
                         'bank_name' => $expense->account->bank->bank_name ?? 'Unknown Bank',
@@ -507,7 +511,8 @@ class TransactionController extends Controller
                         'amount' => 'Rp ' . number_format($expense->amount, 0, ',', '.'),
                         'expense_date' => $expenseDate->format('d M Y'),
                         'expense_time' => $createdAt->format('H:i'),
-                        'expense_datetime' => $expenseDate->format('d M Y') . ' ' . $createdAt->format('H:i')
+                        'expense_datetime' => $expenseDate->format('d M Y') . ' ' . $createdAt->format('H:i'),
+                        'expense_type' => $isMonthlyExpense ? 'Monthly Budget' : 'Regular Expense'
                     ]
                 ];
             });
