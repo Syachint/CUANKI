@@ -286,15 +286,19 @@ class AssetController extends Controller
     /**
      * Delete an entire account and handle allocation redistribution
      */
-    public function deleteAccount(Request $request)
+    public function deleteAccount(Request $request, $id)
     {
         try {
-            $request->validate([
-                'account_id' => 'required|exists:accounts,id'
-            ]);
-
             $user = $request->user();
-            $accountId = $request->account_id;
+            $accountId = $id;
+
+            // Validate account exists
+            if (!Account::where('id', $accountId)->exists()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Account not found'
+                ], 404);
+            }
 
             // Get the account to be deleted
             $accountToDelete = Account::with(['allocations', 'bank'])

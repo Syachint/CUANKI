@@ -58,7 +58,7 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/user-accounts', [AssetController::class, 'getUserAccounts']);
     // Route::put('/update-account-balance', [AssetController::class, 'updateAccountBalance']);
     Route::put('/update-account-allocation', [AssetController::class, 'updateAccountAllocation']);
-    Route::delete('/delete-account', [AssetController::class, 'deleteAccount']);
+    Route::delete('/account/{id}', [AssetController::class, 'deleteAccount']);
     Route::get('/usage-bar-allocation', [AssetController::class, 'getUsageBarAllocation']);
     
     // Goal endpoints
@@ -72,7 +72,13 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::put('/goals/{id}', [GoalController::class, 'updateGoal']);
     Route::delete('/goals/{id}', [GoalController::class, 'deleteGoal']);
     
-    // User management endpoints
+    // User Profile CRUD endpoints
+    Route::get('/profile', [UserController::class, 'getUserProfile']);
+    Route::put('/profile', [UserController::class, 'updateUserProfile']);
+    Route::post('/profile/picture', [UserController::class, 'updateProfilePicture']);
+    Route::delete('/profile', [UserController::class, 'deleteUserAccount']);
+    
+    // User management endpoints (legacy)
     Route::get('/user-data', [UserController::class, 'getUserData']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
