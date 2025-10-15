@@ -72,7 +72,7 @@ Route::middleware('auth:sanctum')->group(function() {
     
     // User management endpoints
     Route::get('/user-data', [UserController::class, 'getUserData']);
-    Route::post('/logout', [UserController::class, 'logout']);
+    Route::post('/logout', [AuthController::class, 'logout']);
 
     // Other endpoints
     Route::get('/advice', [AdviceController::class, 'getAdvices']);
