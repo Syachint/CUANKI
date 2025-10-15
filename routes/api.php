@@ -9,12 +9,13 @@ use App\Http\Controllers\GoogleController;
 use App\Http\Controllers\AdviceController;
 use App\Http\Controllers\FormDetailController;
 use App\Http\Controllers\TransactionController;
+use App\Http\Controllers\AssetController;
 use App\Http\Controllers\GoalController;
 
+// Auth endpoints
 Route::post('/register', [AuthController::class, 'registerUser']);
 Route::post('/login', [AuthController::class, 'loginUser']);
 Route::post('/refresh', [AuthController::class, 'refreshToken']);
-
 Route::controller(GoogleController::class)->group(function () {
     Route::get('/auth/google', 'googleLogin')->name('auth.google');
     Route::get('/auth/google/callback', 'googleAuthentication')->name('auth.google.callback');
@@ -23,6 +24,8 @@ Route::controller(GoogleController::class)->group(function () {
 // Route::get('/auth/google', [GoogleController::class, 'redirectToGoogle']);
 // Route::get('/auth/google/callback', [GoogleController::class, 'handleGoogleCallback']);
 // Route::post('/auth/google/login', [GoogleController::class, 'loginWithGoogle']); // For mobile/API
+
+// Dropdown endpoints
 Route::get('/listbank', [FormDetailController::class, 'listBanks']);
 Route::get('/origins', [FormDetailController::class, 'getOrigins']);
 Route::get('/expense-categories', [TransactionController::class, 'getExpenseCategories']);
@@ -33,18 +36,6 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::post('/form/account', [FormDetailController::class, 'formDetailAccount']);
     Route::post('/form/plan', [FormDetailController::class, 'formDetailPlan']);
     
-    // Transaction endpoints
-    Route::get('/user-accounts', [TransactionController::class, 'getUserAccounts']);
-    Route::post('/add-income', [TransactionController::class, 'addIncome']);
-    Route::post('/add-expense', [TransactionController::class, 'addExpense']);
-    
-    // Other endpoints
-    Route::get('/advice', [AdviceController::class, 'getAdvices']);
-
-    // User management endpoints
-    Route::get('/user-data', [UserController::class, 'getUserData']);
-    Route::post('/logout', [UserController::class, 'logout']);
-    
     // Dashboard endpoints
     Route::post('/add-new-account', [DashboardController::class, 'addNewAccount']);
     Route::get('/greeting-user', [DashboardController::class, 'getGreetingUser']);
@@ -52,14 +43,21 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/today-expenses', [DashboardController::class, 'getTodayExpenses']);
     Route::get('/daily-saving', [DashboardController::class, 'getDailySaving']);
     Route::get('/receipt-today', [DashboardController::class, 'getReceiptToday']);
-    Route::get('/detail-receipt-expense', [TransactionController::class, 'getDetailReceiptExpense']);
-    Route::get('/detail-receipt-incomes', [TransactionController::class, 'getDetailReceiptIncomes']);
     Route::get('/calendar-status', [DashboardController::class, 'getCalendarStatus']);
     Route::get('/timezone-test', [DashboardController::class, 'timezoneTest']);
     Route::get('/budget-comparison', [DashboardController::class, 'getBudgetComparison']);
     Route::put('/update-account-balance', [DashboardController::class, 'updateAccountBalance']);
     Route::post('/generate-today-budget', [DashboardController::class, 'generateTodayBudget']);
-
+    
+    // Transaction endpoints
+    Route::post('/add-income', [TransactionController::class, 'addIncome']);
+    Route::post('/add-expense', [TransactionController::class, 'addExpense']);
+    Route::get('/detail-receipt-expense', [TransactionController::class, 'getDetailReceiptExpense']);
+    Route::get('/detail-receipt-incomes', [TransactionController::class, 'getDetailReceiptIncomes']);
+    
+    // Asset endpoints
+    Route::get('/user-accounts', [AssetController::class, 'getUserAccounts']);
+    
     // Goal endpoints
     Route::get('/goal-graphic-rate', [GoalController::class, 'getGoalGraphicRate']);
     Route::get('/main-goal-progress', [GoalController::class, 'getMainGoalProgress']);
@@ -70,7 +68,11 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/goals/{id}', [GoalController::class, 'getGoal']);
     Route::put('/goals/{id}', [GoalController::class, 'updateGoal']);
     Route::delete('/goals/{id}', [GoalController::class, 'deleteGoal']);
+    
+    // User management endpoints
+    Route::get('/user-data', [UserController::class, 'getUserData']);
+    Route::post('/logout', [UserController::class, 'logout']);
 
-    // Advice endpoints
+    // Other endpoints
     Route::get('/advice', [AdviceController::class, 'getAdvices']);
 });
