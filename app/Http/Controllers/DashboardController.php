@@ -31,6 +31,14 @@ class DashboardController extends Controller
         return Carbon::createFromDate($year, $month, $day, config('app.timezone', 'Asia/Jakarta'));
     }
 
+    /**
+     * Round currency amounts to 2 decimal places for cleaner display
+     */
+    private function roundCurrency($amount)
+    {
+        return round((float)$amount, 2);
+    }
+
     public function getGreetingUser(Request $request)
     {
         try {
@@ -67,9 +75,10 @@ class DashboardController extends Controller
             $daysInMonth = $this->now()->daysInMonth;
 
             // Sum daily_budget from all accounts for today
-            $dailyBudget = $todayBudgets->sum('daily_budget');
-            $initialDailyBudget = $todayBudgets->sum('initial_daily_budget');
-            $budgetDifference = $dailyBudget - $initialDailyBudget;
+            // Round to 2 decimal places untuk pembacaan yang lebih rapi
+            $dailyBudget = $this->roundCurrency($todayBudgets->sum('daily_budget'));
+            $initialDailyBudget = $this->roundCurrency($todayBudgets->sum('initial_daily_budget'));
+            $budgetDifference = $this->roundCurrency($dailyBudget - $initialDailyBudget);
             $dataSource = 'budget_table';
 
             // Create greeting message
@@ -322,11 +331,11 @@ class DashboardController extends Controller
                 ->whereDate('created_at', $today)
                 ->get();
 
-            // Sum daily_budget and daily_saving from all accounts for today
-            $totalDailyBudget = $todayBudgets->sum('daily_budget');
-            $totalInitialBudget = $todayBudgets->sum('initial_daily_budget');
-            $totalDailySaving = $todayBudgets->sum('daily_saving');
-            $budgetDifference = $totalDailyBudget - $totalInitialBudget;
+            // Sum daily_budget and daily_saving from all accounts for today (dengan pembulatan)
+            $totalDailyBudget = $this->roundCurrency($todayBudgets->sum('daily_budget'));
+            $totalInitialBudget = $this->roundCurrency($todayBudgets->sum('initial_daily_budget'));
+            $totalDailySaving = $this->roundCurrency($todayBudgets->sum('daily_saving'));
+            $budgetDifference = $this->roundCurrency($totalDailyBudget - $totalInitialBudget);
 
             // Get today's expenses
             $todayExpenses = Expense::where('user_id', $userId)
@@ -408,11 +417,11 @@ class DashboardController extends Controller
                 ->whereDate('created_at', $today)
                 ->get();
 
-            // Sum daily_saving from all accounts for today
-            $totalDailySaving = $todayBudgets->sum('daily_saving');
-            $totalDailyBudget = $todayBudgets->sum('daily_budget');
-            $totalInitialBudget = $todayBudgets->sum('initial_daily_budget');
-            $budgetDifference = $totalDailyBudget - $totalInitialBudget;
+            // Sum daily_saving from all accounts for today (dengan pembulatan)
+            $totalDailySaving = $this->roundCurrency($todayBudgets->sum('daily_saving'));
+            $totalDailyBudget = $this->roundCurrency($todayBudgets->sum('daily_budget'));
+            $totalInitialBudget = $this->roundCurrency($todayBudgets->sum('initial_daily_budget'));
+            $budgetDifference = $this->roundCurrency($totalDailyBudget - $totalInitialBudget);
 
             return response()->json([
                 'status' => 'success',

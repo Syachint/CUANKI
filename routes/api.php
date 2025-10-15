@@ -11,6 +11,7 @@ use App\Http\Controllers\FormDetailController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\AssetController;
 use App\Http\Controllers\GoalController;
+use App\Http\Controllers\MonthlyExpenseController;
 
 // Auth endpoints
 Route::post('/register', [AuthController::class, 'registerUser']);
@@ -71,6 +72,14 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/goals/{id}', [GoalController::class, 'getGoal']);
     Route::put('/goals/{id}', [GoalController::class, 'updateGoal']);
     Route::delete('/goals/{id}', [GoalController::class, 'deleteGoal']);
+    
+    // Monthly Expenses CRUD
+    Route::get('/monthly-expenses', [MonthlyExpenseController::class, 'index']);
+    Route::post('/monthly-expenses', [MonthlyExpenseController::class, 'store']);
+    Route::put('/monthly-expenses/{id}', [MonthlyExpenseController::class, 'update']);
+    Route::delete('/monthly-expenses/{id}', [MonthlyExpenseController::class, 'destroy']);
+    Route::post('/monthly-expenses/{id}/add-expense', [MonthlyExpenseController::class, 'addExpenseAmount']);
+    Route::get('/monthly-expenses/categories', [MonthlyExpenseController::class, 'getCategories']);
     
     // User Profile CRUD endpoints
     Route::get('/profile', [UserController::class, 'getUserProfile']);
