@@ -45,7 +45,6 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/calendar-status', [DashboardController::class, 'getCalendarStatus']);
     Route::get('/timezone-test', [DashboardController::class, 'timezoneTest']);
     Route::get('/budget-comparison', [DashboardController::class, 'getBudgetComparison']);
-    Route::put('/update-account-balance', [DashboardController::class, 'updateAccountBalance']);
     Route::post('/generate-today-budget', [DashboardController::class, 'generateTodayBudget']);
     
     // Transaction endpoints
@@ -57,6 +56,7 @@ Route::middleware('auth:sanctum')->group(function() {
     // Asset endpoints
     Route::get('/user-accounts', [AssetController::class, 'getUserAccounts']);
     Route::post('/add-new-account', [AssetController::class, 'addNewAccount']);
+    Route::put('/update-account-balance', [AssetController::class, 'updateAccountBalance']);
     
     // Goal endpoints
     Route::get('/goal-graphic-rate', [GoalController::class, 'getGoalGraphicRate']);
