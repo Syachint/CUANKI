@@ -284,6 +284,281 @@ class AssetController extends Controller
     }
 
     /**
+     * Delete an entire account and handle allocation redistribution
+     */
+    public function deleteAccount(Request $request)
+    {
+        try {
+            $request->validate([
+                'account_id' => 'required|exists:accounts,id'
+            ]);
+
+            $user = $request->user();
+            $accountId = $request->account_id;
+
+            // Get the account to be deleted
+            $accountToDelete = Account::with(['allocations', 'bank'])
+                ->where('id', $accountId)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$accountToDelete) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Account not found or access denied'
+                ], 404);
+            }
+
+            // Get all user accounts
+            $userAccounts = Account::where('user_id', $user->id)
+                ->with(['allocations'])
+                ->orderBy('id')
+                ->get();
+
+            $totalBanks = $userAccounts->count();
+
+            // Prevent deletion if user only has 1 account
+            if ($totalBanks <= 1) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Cannot delete account. You must have at least one account.'
+                ], 400);
+            }
+
+            DB::beginTransaction();
+
+            try {
+                $deletedAccountData = [
+                    'id' => $accountToDelete->id,
+                    'bank_name' => $accountToDelete->bank->code_name ?? 'Unknown Bank',
+                    'allocations' => $accountToDelete->allocations->map(function($allocation) {
+                        return [
+                            'type' => $allocation->type,
+                            'balance_per_type' => $allocation->balance_per_type
+                        ];
+                    })
+                ];
+
+                $redistributionLog = [];
+
+                // Handle allocation redistribution based on scenario
+                if ($totalBanks == 2) {
+                    // 2 Banks -> 1 Bank: Move all allocations to remaining account
+                    $remainingAccount = $userAccounts->where('id', '!=', $accountId)->first();
+                    
+                    foreach ($accountToDelete->allocations as $allocation) {
+                        // Check if remaining account already has this type
+                        $existingAllocation = $remainingAccount->allocations()
+                            ->where('type', $allocation->type)
+                            ->first();
+
+                        if ($existingAllocation) {
+                            // Merge balances
+                            $oldBalance = $existingAllocation->balance_per_type;
+                            $newBalance = $oldBalance + $allocation->balance_per_type;
+                            $existingAllocation->update(['balance_per_type' => $newBalance]);
+                            
+                            $redistributionLog[] = [
+                                'action' => 'merged',
+                                'type' => $allocation->type,
+                                'from_account' => $accountId,
+                                'to_account' => $remainingAccount->id,
+                                'old_balance' => $oldBalance,
+                                'added_balance' => $allocation->balance_per_type,
+                                'new_balance' => $newBalance
+                            ];
+                        } else {
+                            // Create new allocation in remaining account
+                            AccountAllocation::create([
+                                'account_id' => $remainingAccount->id,
+                                'type' => $allocation->type,
+                                'balance_per_type' => $allocation->balance_per_type,
+                                'allocation_date' => now()
+                            ]);
+                            
+                            $redistributionLog[] = [
+                                'action' => 'moved',
+                                'type' => $allocation->type,
+                                'from_account' => $accountId,
+                                'to_account' => $remainingAccount->id,
+                                'balance' => $allocation->balance_per_type
+                            ];
+                        }
+                    }
+
+                } elseif ($totalBanks == 3) {
+                    // 3 Banks -> 2 Banks: Smart redistribution
+                    $remainingAccounts = $userAccounts->where('id', '!=', $accountId);
+                    $firstAccount = $remainingAccounts->first();
+                    $secondAccount = $remainingAccounts->last();
+
+                    foreach ($accountToDelete->allocations as $allocation) {
+                        // Distribute based on allocation type strategy
+                        if ($allocation->type === 'Kebutuhan') {
+                            // Kebutuhan goes to first remaining account
+                            $targetAccount = $firstAccount;
+                        } elseif ($allocation->type === 'Tabungan') {
+                            // Tabungan goes to second remaining account  
+                            $targetAccount = $secondAccount;
+                        } else {
+                            // Darurat goes to account with fewer allocations
+                            $firstCount = $firstAccount->allocations()->count();
+                            $secondCount = $secondAccount->allocations()->count();
+                            $targetAccount = $firstCount <= $secondCount ? $firstAccount : $secondAccount;
+                        }
+
+                        // Check if target account already has this type
+                        $existingAllocation = $targetAccount->allocations()
+                            ->where('type', $allocation->type)
+                            ->first();
+
+                        if ($existingAllocation) {
+                            // Merge balances
+                            $oldBalance = $existingAllocation->balance_per_type;
+                            $newBalance = $oldBalance + $allocation->balance_per_type;
+                            $existingAllocation->update(['balance_per_type' => $newBalance]);
+                            
+                            $redistributionLog[] = [
+                                'action' => 'merged',
+                                'type' => $allocation->type,
+                                'from_account' => $accountId,
+                                'to_account' => $targetAccount->id,
+                                'old_balance' => $oldBalance,
+                                'added_balance' => $allocation->balance_per_type,
+                                'new_balance' => $newBalance
+                            ];
+                        } else {
+                            // Create new allocation
+                            AccountAllocation::create([
+                                'account_id' => $targetAccount->id,
+                                'type' => $allocation->type,
+                                'balance_per_type' => $allocation->balance_per_type,
+                                'allocation_date' => now()
+                            ]);
+                            
+                            $redistributionLog[] = [
+                                'action' => 'moved',
+                                'type' => $allocation->type,
+                                'from_account' => $accountId,
+                                'to_account' => $targetAccount->id,
+                                'balance' => $allocation->balance_per_type
+                            ];
+                        }
+                    }
+
+                } else {
+                    // 4+ Banks: Distribute to first remaining account
+                    $firstRemainingAccount = $userAccounts->where('id', '!=', $accountId)->first();
+                    
+                    foreach ($accountToDelete->allocations as $allocation) {
+                        $existingAllocation = $firstRemainingAccount->allocations()
+                            ->where('type', $allocation->type)
+                            ->first();
+
+                        if ($existingAllocation) {
+                            $oldBalance = $existingAllocation->balance_per_type;
+                            $newBalance = $oldBalance + $allocation->balance_per_type;
+                            $existingAllocation->update(['balance_per_type' => $newBalance]);
+                            
+                            $redistributionLog[] = [
+                                'action' => 'merged',
+                                'type' => $allocation->type,
+                                'from_account' => $accountId,
+                                'to_account' => $firstRemainingAccount->id,
+                                'old_balance' => $oldBalance,
+                                'added_balance' => $allocation->balance_per_type,
+                                'new_balance' => $newBalance
+                            ];
+                        } else {
+                            AccountAllocation::create([
+                                'account_id' => $firstRemainingAccount->id,
+                                'type' => $allocation->type,
+                                'balance_per_type' => $allocation->balance_per_type,
+                                'allocation_date' => now()
+                            ]);
+                            
+                            $redistributionLog[] = [
+                                'action' => 'moved',
+                                'type' => $allocation->type,
+                                'from_account' => $accountId,
+                                'to_account' => $firstRemainingAccount->id,
+                                'balance' => $allocation->balance_per_type
+                            ];
+                        }
+                    }
+                }
+
+                // Delete all allocations first, then the account
+                AccountAllocation::where('account_id', $accountId)->delete();
+                $accountToDelete->delete();
+
+                // Recalculate all remaining account balances
+                $updatedAccounts = Account::where('user_id', $user->id)
+                    ->with(['allocations', 'bank'])
+                    ->get();
+
+                foreach ($updatedAccounts as $account) {
+                    $totalBalance = $account->allocations()->sum('balance_per_type');
+                    $account->update([
+                        'current_balance' => $totalBalance,
+                        'initial_balance' => max($account->initial_balance, $totalBalance)
+                    ]);
+                }
+
+                DB::commit();
+
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Account deleted successfully and allocations redistributed',
+                    'data' => [
+                        'deleted_account' => $deletedAccountData,
+                        'redistribution_summary' => [
+                            'total_banks_before' => $totalBanks,
+                            'total_banks_after' => $totalBanks - 1,
+                            'redistribution_log' => $redistributionLog
+                        ],
+                        'remaining_accounts' => $updatedAccounts->map(function($account) {
+                            return [
+                                'account_id' => $account->id,
+                                'bank_name' => $account->bank->code_name ?? 'Unknown Bank',
+                                'current_balance' => $account->current_balance,
+                                'initial_balance' => $account->initial_balance,
+                                'allocations' => $account->allocations->map(function($allocation) {
+                                    return [
+                                        'allocation_id' => $allocation->id,
+                                        'type' => $allocation->type,
+                                        'balance_per_type' => $allocation->balance_per_type,
+                                        'formatted_balance' => 'Rp ' . number_format($allocation->balance_per_type, 0, ',', '.')
+                                    ];
+                                }),
+                                'formatted_balance' => 'Rp ' . number_format($account->current_balance, 0, ',', '.')
+                            ];
+                        }),
+                        'total_balance_preserved' => $updatedAccounts->sum('current_balance'),
+                        'formatted_total_balance' => 'Rp ' . number_format($updatedAccounts->sum('current_balance'), 0, ',', '.')
+                    ]
+                ], 200);
+
+            } catch (\Exception $e) {
+                DB::rollback();
+                throw $e;
+            }
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error deleting account: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Update account allocation (type and/or balance) with intelligent swapping
      * Can update type only, balance only, or both type and balance
      */

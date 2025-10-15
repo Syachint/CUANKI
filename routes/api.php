@@ -58,6 +58,7 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/user-accounts', [AssetController::class, 'getUserAccounts']);
     // Route::put('/update-account-balance', [AssetController::class, 'updateAccountBalance']);
     Route::put('/update-account-allocation', [AssetController::class, 'updateAccountAllocation']);
+    Route::delete('/delete-account', [AssetController::class, 'deleteAccount']);
     Route::get('/usage-bar-allocation', [AssetController::class, 'getUsageBarAllocation']);
     
     // Goal endpoints
