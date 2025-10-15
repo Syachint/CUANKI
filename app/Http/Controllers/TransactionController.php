@@ -28,7 +28,7 @@ class TransactionController extends Controller
                 'tanggal' => 'required|date',
                 'total' => 'required|numeric|min:0',
                 'notes' => 'nullable|string|max:255',
-                'aset' => 'required|string|max:255', // Account format: "bank_id - type"
+                'bank_allocation_id' => 'required|exists:accounts_allocation,id',
             ]);
 
             $user = $request->user();
@@ -40,34 +40,23 @@ class TransactionController extends Controller
                 ], 401);
             }
 
-            // Parse account name to find the account
-            // Format expected: "bank_id - type" (e.g., "1 - Kebutuhan")
-            $asetParts = explode(' - ', $request->aset);
-            if (count($asetParts) !== 2) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Invalid account format. Expected format: "bank_id - type"'
-                ], 400);
-            }
-
-            $bankId = trim($asetParts[0]);
-            $allocationType = trim($asetParts[1]);
-
-            // Find the account based on bank_id and verify allocation type exists
-            $account = Account::where('user_id', $user->id)
-                ->where('bank_id', $bankId)
-                ->whereHas('allocations', function($query) use ($allocationType) {
-                    $query->where('type', $allocationType);
+            // Find the allocation and verify user ownership
+            $allocation = AccountAllocation::with(['account.bank'])
+                ->where('id', $request->bank_allocation_id)
+                ->whereHas('account', function($query) use ($user) {
+                    $query->where('user_id', $user->id);
                 })
-                ->with(['bank', 'allocations'])
                 ->first();
 
-            if (!$account) {
+            if (!$allocation) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Account not found with bank_id: ' . $bankId
+                    'message' => 'Bank allocation not found or access denied'
                 ], 404);
             }
+
+            $account = $allocation->account;
+            $allocationType = $allocation->type;
 
             // Create income record
             $income = Income::create([
@@ -83,23 +72,26 @@ class TransactionController extends Controller
                 'confirmation_status' => 'Pending'
             ]);
 
-            // Update account allocation balance (add income to the specific allocation type)
-            $allocation = $account->allocations->where('type', $allocationType)->first();
-            if ($allocation) {
-                $oldAllocationBalance = $allocation->balance_per_type;
-                $allocation->balance_per_type += $request->total;
-                $allocation->save();
-            }
+            // Update account allocation balance (add income to the specific allocation)
+            $oldAllocationBalance = $allocation->balance_per_type;
+            $allocation->balance_per_type += $request->total;
+            $allocation->save();
 
-            // Update account current_balance
+            // Update account current_balance (sum of all allocations)
             $oldCurrentBalance = $account->current_balance;
-            $account->current_balance += $request->total;
-            $account->save();
+            $account->refresh();
+            $newCurrentBalance = $account->allocations()->sum('balance_per_type');
+            $account->update([
+                'current_balance' => $newCurrentBalance,
+                'initial_balance' => max($account->initial_balance, $newCurrentBalance)
+            ]);
 
-            // Update or create budget if allocation type is "Kebutuhan"
+            // Update daily budget if allocation type is "Kebutuhan"
             $budgetData = null;
             if ($allocationType === 'Kebutuhan') {
-                $budgetData = $this->updateBudgetFromIncome($user->id, $account->id, $allocation->balance_per_type);
+                // Get total kebutuhan balance from all accounts
+                $totalKebutuhanBalance = $this->getTotalKebutuhanBalance($user->id);
+                $budgetData = $this->updateDailyBudgetFromIncome($user->id, $request->total, $totalKebutuhanBalance);
             }
 
             return response()->json([
@@ -116,25 +108,26 @@ class TransactionController extends Controller
                     'confirmation_status' => $income->confirmation_status,
                     'created_at' => $income->created_at->format('Y-m-d H:i:s'),
                     'allocation_update' => [
+                        'allocation_id' => $allocation->id,
                         'allocation_type' => $allocationType,
-                        'old_balance' => $oldAllocationBalance ?? 0,
-                        'new_balance' => $allocation ? $allocation->balance_per_type : 0,
+                        'old_balance' => $oldAllocationBalance,
+                        'new_balance' => $allocation->balance_per_type,
                         'balance_increase' => $request->total
                     ],
                     'account_update' => [
                         'old_current_balance' => $oldCurrentBalance,
-                        'new_current_balance' => $account->current_balance,
+                        'new_current_balance' => $newCurrentBalance,
                         'balance_increase' => $request->total
                     ],
                     'budget_update' => $budgetData,
                     'formatted' => [
                         'amount' => 'Rp ' . number_format($income->amount, 0, ',', '.'),
                         'received_date' => Carbon::parse($income->received_date)->format('d M Y'),
-                        'aset' => $request->aset,
-                        'old_allocation_balance' => 'Rp ' . number_format($oldAllocationBalance ?? 0, 0, ',', '.'),
-                        'new_allocation_balance' => 'Rp ' . number_format($allocation ? $allocation->balance_per_type : 0, 0, ',', '.'),
+                        'bank_allocation' => ($account->bank->code_name ?? 'Unknown Bank') . ' - ' . $allocationType,
+                        'old_allocation_balance' => 'Rp ' . number_format($oldAllocationBalance, 0, ',', '.'),
+                        'new_allocation_balance' => 'Rp ' . number_format($allocation->balance_per_type, 0, ',', '.'),
                         'old_current_balance' => 'Rp ' . number_format($oldCurrentBalance, 0, ',', '.'),
-                        'new_current_balance' => 'Rp ' . number_format($account->current_balance, 0, ',', '.')
+                        'new_current_balance' => 'Rp ' . number_format($newCurrentBalance, 0, ',', '.')
                     ]
                 ]
             ], 201);
@@ -167,7 +160,7 @@ class TransactionController extends Controller
                 'total' => 'required|numeric|min:0',
                 'notes' => 'nullable|string|max:255',
                 'kategori' => 'required|integer|exists:expense_categories,id',
-                'aset' => 'required|string|max:255', // Account format: "bank_id - type"
+                'bank_allocation_id' => 'required|exists:accounts_allocation,id',
             ]);
 
             $user = $request->user();
@@ -179,51 +172,39 @@ class TransactionController extends Controller
                 ], 401);
             }
 
-            // Parse account name to find the account
-            // Format expected: "bank_id - type" (e.g., "1 - Kebutuhan")
-            $asetParts = explode(' - ', $request->aset);
-            if (count($asetParts) !== 2) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Invalid account format. Expected format: "bank_id - type"'
-                ], 400);
-            }
-
-            $bankId = trim($asetParts[0]);
-            $allocationType = trim($asetParts[1]);
-
-            // Find the account based on bank_id and verify allocation type exists
-            $account = Account::where('user_id', $user->id)
-                ->where('bank_id', $bankId)
-                ->whereHas('allocations', function($query) use ($allocationType) {
-                    $query->where('type', $allocationType);
+            // Find the allocation and verify user ownership
+            $allocation = AccountAllocation::with(['account.bank'])
+                ->where('id', $request->bank_allocation_id)
+                ->whereHas('account', function($query) use ($user) {
+                    $query->where('user_id', $user->id);
                 })
-                ->with(['bank', 'allocations'])
                 ->first();
 
-            if (!$account) {
+            if (!$allocation) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Account not found with bank_id: ' . $bankId
+                    'message' => 'Bank allocation not found or access denied'
                 ], 404);
             }
 
-            // Verify the category belongs to the user
+            $account = $allocation->account;
+            $allocationType = $allocation->type;
+
+            // Verify the category exists
             $category = ExpenseCategories::where('id', $request->kategori)->first();
 
             if (!$category) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Category not found or not accessible'
+                    'message' => 'Category not found'
                 ], 404);
             }
 
             // Check if user has enough balance in the allocation
-            $allocation = $account->allocations->where('type', $allocationType)->first();
-            if (!$allocation || $allocation->balance_per_type < $request->total) {
+            if ($allocation->balance_per_type < $request->total) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Insufficient balance in ' . $allocationType . ' allocation'
+                    'message' => 'Insufficient balance in ' . $allocationType . ' allocation. Available: Rp ' . number_format($allocation->balance_per_type, 0, ',', '.')
                 ], 400);
             }
 
@@ -239,20 +220,26 @@ class TransactionController extends Controller
                 'frequency' => 'Sekali', // Default for manual entry
             ]);
 
-            // Update account allocation balance (subtract expense from the specific allocation type)
+            // Update account allocation balance (subtract expense from the specific allocation)
             $oldAllocationBalance = $allocation->balance_per_type;
             $allocation->balance_per_type -= $request->total;
             $allocation->save();
 
-            // Update account current_balance
+            // Update account current_balance (sum of all allocations)
             $oldCurrentBalance = $account->current_balance;
-            $account->current_balance -= $request->total;
-            $account->save();
+            $account->refresh();
+            $newCurrentBalance = $account->allocations()->sum('balance_per_type');
+            $account->update([
+                'current_balance' => $newCurrentBalance,
+                'initial_balance' => max($account->initial_balance, $newCurrentBalance)
+            ]);
 
-            // Update budget if allocation type is "Kebutuhan"
+            // Update daily budget if allocation type is "Kebutuhan"
             $budgetData = null;
             if ($allocationType === 'Kebutuhan') {
-                $budgetData = $this->updateBudgetFromExpense($user->id, $account->id, $request->total, $allocation->balance_per_type);
+                // Get total kebutuhan balance from all accounts after expense
+                $totalKebutuhanBalance = $this->getTotalKebutuhanBalance($user->id);
+                $budgetData = $this->updateDailyBudgetFromExpense($user->id, $request->total, $totalKebutuhanBalance);
             }
 
             return response()->json([
@@ -270,6 +257,7 @@ class TransactionController extends Controller
                     'expense_date' => $expense->expense_date,
                     'created_at' => $expense->created_at->format('Y-m-d H:i:s'),
                     'allocation_update' => [
+                        'allocation_id' => $allocation->id,
                         'allocation_type' => $allocationType,
                         'old_balance' => $oldAllocationBalance,
                         'new_balance' => $allocation->balance_per_type,
@@ -277,19 +265,19 @@ class TransactionController extends Controller
                     ],
                     'account_update' => [
                         'old_current_balance' => $oldCurrentBalance,
-                        'new_current_balance' => $account->current_balance,
+                        'new_current_balance' => $newCurrentBalance,
                         'balance_decrease' => $request->total
                     ],
                     'budget_update' => $budgetData,
                     'formatted' => [
                         'amount' => 'Rp ' . number_format($expense->amount, 0, ',', '.'),
                         'expense_date' => Carbon::parse($expense->expense_date)->format('d M Y'),
-                        'aset' => $request->aset,
+                        'bank_allocation' => ($account->bank->code_name ?? 'Unknown Bank') . ' - ' . $allocationType,
                         'kategori' => $category->name,
                         'old_allocation_balance' => 'Rp ' . number_format($oldAllocationBalance, 0, ',', '.'),
                         'new_allocation_balance' => 'Rp ' . number_format($allocation->balance_per_type, 0, ',', '.'),
                         'old_current_balance' => 'Rp ' . number_format($oldCurrentBalance, 0, ',', '.'),
-                        'new_current_balance' => 'Rp ' . number_format($account->current_balance, 0, ',', '.')
+                        'new_current_balance' => 'Rp ' . number_format($newCurrentBalance, 0, ',', '.')
                     ]
                 ]
             ], 201);
@@ -305,6 +293,144 @@ class TransactionController extends Controller
                 'status' => 'error',
                 'message' => 'Error adding expense: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Get total kebutuhan balance from all user accounts
+     */
+    private function getTotalKebutuhanBalance($userId)
+    {
+        return AccountAllocation::whereHas('account', function($query) use ($userId) {
+            $query->where('user_id', $userId);
+        })
+        ->where('type', 'Kebutuhan')
+        ->sum('balance_per_type');
+    }
+
+    /**
+     * Update daily budget after income added to kebutuhan
+     */
+    private function updateDailyBudgetFromIncome($userId, $incomeAmount, $totalKebutuhanBalance)
+    {
+        try {
+            // Get current month details - total days in month
+            $daysInMonth = $this->now()->daysInMonth;
+            
+            // Calculate new daily budget from total kebutuhan balance
+            $newDailyBudget = $daysInMonth > 0 ? round($totalKebutuhanBalance / $daysInMonth, 0) : 0;
+
+            // Get today's date
+            $today = $this->now()->toDateString();
+            
+            // Update all today's budgets for all user accounts with kebutuhan
+            $accountIds = Account::where('user_id', $userId)
+                ->whereHas('allocations', function($query) {
+                    $query->where('type', 'Kebutuhan');
+                })
+                ->pluck('id');
+
+            $budgetsUpdated = 0;
+            $totalOldDailyBudget = 0;
+
+            foreach ($accountIds as $accountId) {
+                $existingBudget = Budget::where('user_id', $userId)
+                    ->where('account_id', $accountId)
+                    ->whereDate('created_at', $today)
+                    ->first();
+
+                if ($existingBudget) {
+                    $totalOldDailyBudget += $existingBudget->daily_budget;
+                    $existingBudget->daily_budget += round($incomeAmount / $daysInMonth, 0);
+                    $existingBudget->save();
+                    $budgetsUpdated++;
+                }
+            }
+
+            return [
+                'action' => 'income_added_to_kebutuhan',
+                'income_amount' => $incomeAmount,
+                'total_kebutuhan_balance' => $totalKebutuhanBalance,
+                'daily_budget_increase_per_account' => round($incomeAmount / $daysInMonth, 0),
+                'accounts_updated' => $budgetsUpdated,
+                'days_in_month' => $daysInMonth,
+                'formatted' => [
+                    'income_amount' => 'Rp ' . number_format($incomeAmount, 0, ',', '.'),
+                    'total_kebutuhan_balance' => 'Rp ' . number_format($totalKebutuhanBalance, 0, ',', '.'),
+                    'daily_budget_increase' => 'Rp ' . number_format(round($incomeAmount / $daysInMonth, 0), 0, ',', '.'),
+                    'accounts_updated' => $budgetsUpdated . ' account(s)'
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            return [
+                'error' => 'Failed to update daily budget from income: ' . $e->getMessage(),
+                'action' => 'failed'
+            ];
+        }
+    }
+
+    /**
+     * Update daily budget after expense from kebutuhan
+     */
+    private function updateDailyBudgetFromExpense($userId, $expenseAmount, $totalKebutuhanBalance)
+    {
+        try {
+            // Get current month details - total days in month
+            $daysInMonth = $this->now()->daysInMonth;
+
+            // Get today's date
+            $today = $this->now()->toDateString();
+            
+            // Find the account that had the expense (should have budget for today)
+            $todayBudgets = Budget::where('user_id', $userId)
+                ->whereDate('created_at', $today)
+                ->get();
+
+            $budgetsUpdated = 0;
+            $totalBudgetDecrease = 0;
+
+            foreach ($todayBudgets as $budget) {
+                if ($budget->daily_budget >= $expenseAmount) {
+                    // Deduct from this budget
+                    $budget->daily_budget -= $expenseAmount;
+                    $budget->save();
+                    $budgetsUpdated++;
+                    $totalBudgetDecrease += $expenseAmount;
+                    break; // Only deduct from one budget
+                } else {
+                    // Deduct what we can and continue to next budget
+                    $deductAmount = $budget->daily_budget;
+                    $budget->daily_budget = 0;
+                    $budget->save();
+                    $expenseAmount -= $deductAmount;
+                    $totalBudgetDecrease += $deductAmount;
+                    $budgetsUpdated++;
+                    
+                    if ($expenseAmount <= 0) break;
+                }
+            }
+
+            return [
+                'action' => 'expense_deducted_from_kebutuhan',
+                'expense_amount' => $totalBudgetDecrease,
+                'total_kebutuhan_balance' => $totalKebutuhanBalance,
+                'daily_budget_decrease' => $totalBudgetDecrease,
+                'accounts_updated' => $budgetsUpdated,
+                'days_in_month' => $daysInMonth,
+                'formatted' => [
+                    'expense_amount' => 'Rp ' . number_format($totalBudgetDecrease, 0, ',', '.'),
+                    'total_kebutuhan_balance' => 'Rp ' . number_format($totalKebutuhanBalance, 0, ',', '.'),
+                    'daily_budget_decrease' => 'Rp ' . number_format($totalBudgetDecrease, 0, ',', '.'),
+                    'accounts_updated' => $budgetsUpdated . ' account(s)'
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            return [
+                'error' => 'Failed to update daily budget from expense: ' . $e->getMessage(),
+                'action' => 'failed'
+            ];
         }
     }
 
