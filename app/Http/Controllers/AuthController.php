@@ -59,18 +59,39 @@ class AuthController extends Controller
         $refreshTokenExpiresAt = $this->now()->addDays(7);
         $refresh_token = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;
 
-        return response()->json([
+        // Set refresh token ke cookies untuk register juga
+        $response = response()->json([
             'status' => 'success',
             'message' => 'Lanjut step 2',
             'data' => [
                 'user' => $user,
                 'access_token' => $access_token,
-                'refresh_token' => $refresh_token,
                 'token_type' => 'Bearer',
                 'access_token_expires_at' => $accessTokenExpiresAt->toDateTimeString(),
-                'refresh_token_expires_at' => $refreshTokenExpiresAt->toDateTimeString()
             ]
         ], 201);
+
+        // Set refresh token sebagai httpOnly cookie
+        $response->cookie(
+            'refresh_token', 
+            $refresh_token, 
+            $refreshTokenExpiresAt->diffInMinutes(now()), // minutes
+            '/', // path
+            null, // domain
+            false, // secure (false untuk development HTTP)
+            true, // httpOnly
+            false, // raw
+            'Lax' // sameSite (Lax untuk development)
+        );
+
+        // Debug: Log cookie setting
+        \Log::info('Setting refresh token cookie in register', [
+            'token_length' => strlen($refresh_token),
+            'expires_in_minutes' => $refreshTokenExpiresAt->diffInMinutes(now()),
+            'expires_at' => $refreshTokenExpiresAt->toDateTimeString()
+        ]);
+
+        return $response;
     }
 
     function loginUser(Request $request) {
@@ -96,18 +117,32 @@ class AuthController extends Controller
             $refreshTokenExpiresAt = $this->now()->addDays(7);
             $refresh_token = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;
 
-            return response()->json([
+            // Set refresh token ke cookies (httpOnly untuk keamanan)
+            $response = response()->json([
                 'status' => 'success',
                 'message' => 'Login berhasil',
                 'data' => [
                     'user' => $user,
                     'access_token' => $access_token,
-                    'refresh_token' => $refresh_token,
                     'token_type' => 'Bearer',
                     'access_token_expires_at' => $accessTokenExpiresAt->toDateTimeString(),
-                    'refresh_token_expires_at' => $refreshTokenExpiresAt->toDateTimeString()
                 ]
             ], 200);
+
+            // Set refresh token sebagai httpOnly cookie
+            $response->cookie(
+                'refresh_token', 
+                $refresh_token, 
+                $refreshTokenExpiresAt->diffInMinutes(now()), // minutes
+                '/', // path
+                null, // domain
+                false, // secure (false untuk development HTTP)
+                true, // httpOnly
+                false, // raw
+                'Lax' // sameSite (Lax untuk development)
+            );
+
+            return $response;
         } else {
             return response()->json([
                 'status' => 'error',
@@ -117,18 +152,24 @@ class AuthController extends Controller
     }
 
     function refreshToken(Request $request) {
-        // Ambil refresh token dari header Authorization
-        $currentRefreshToken = $request->bearerToken();
+        // Ambil refresh token dari cookies
+        $currentRefreshToken = $request->cookie('refresh_token');
         
         if (!$currentRefreshToken) {
-            return response()->json(['error' => 'Refresh token not provided'], 401);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Refresh token not found in cookies'
+            ], 401);
         }
 
         // Cari refresh token di personal access tokens
         $refreshToken = PersonalAccessToken::findToken($currentRefreshToken);
 
         if (!$refreshToken || !$refreshToken->can('refresh') || $refreshToken->expires_at->isPast()) {
-            return response()->json(['error' => 'Invalid or expired refresh token'], 401);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Invalid or expired refresh token'
+            ], 401);
         }
 
         $user = $refreshToken->tokenable;
@@ -143,22 +184,57 @@ class AuthController extends Controller
         $newAccessToken = $user->createToken('access_token', ['access-api'], $accessTokenExpiresAt)->plainTextToken;
         $newRefreshToken = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;
 
-        return response()->json([
+        // Response dengan access token baru dan set refresh token ke cookies
+        $response = response()->json([
             'status' => 'success',
             'message' => 'Token refreshed successfully',
             'data' => [
                 'access_token' => $newAccessToken,
-                'refresh_token' => $newRefreshToken,
                 'token_type' => 'Bearer',
                 'access_token_expires_at' => $accessTokenExpiresAt->toDateTimeString(),
-                'refresh_token_expires_at' => $refreshTokenExpiresAt->toDateTimeString()
             ]
         ]);
+
+        // Set refresh token baru ke cookies
+        $response->cookie(
+            'refresh_token', 
+            $newRefreshToken, 
+            $refreshTokenExpiresAt->diffInMinutes(now()), // minutes
+            '/', // path
+            null, // domain
+            false, // secure (false untuk development HTTP)
+            true, // httpOnly
+            false, // raw
+            'Lax' // sameSite (Lax untuk development)
+        );
+
+        return $response;
     }
 
     public function logout(Request $request)
     {
+        // Hapus semua tokens user
         $request->user()->tokens()->delete();
-        return response()->json(['message' => 'Logged out successfully'], 200);
+        
+        // Response dengan menghapus refresh token cookie
+        $response = response()->json([
+            'status' => 'success',
+            'message' => 'Logged out successfully'
+        ], 200);
+
+        // Hapus refresh token cookie dengan mengset expired
+        $response->cookie(
+            'refresh_token', 
+            '', 
+            -1, // expired
+            '/', // path
+            null, // domain
+            false, // secure (false untuk development HTTP)
+            true, // httpOnly
+            false, // raw
+            'Lax' // sameSite (Lax untuk development)
+        );
+
+        return $response;
     }
 }
