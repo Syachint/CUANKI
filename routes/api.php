@@ -37,7 +37,6 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::post('/form/plan', [FormDetailController::class, 'formDetailPlan']);
     
     // Dashboard endpoints
-    Route::post('/add-new-account', [DashboardController::class, 'addNewAccount']);
     Route::get('/greeting-user', [DashboardController::class, 'getGreetingUser']);
     Route::get('/goals-progress', [DashboardController::class, 'getGoalsProgress']);
     Route::get('/today-expenses', [DashboardController::class, 'getTodayExpenses']);
@@ -57,6 +56,7 @@ Route::middleware('auth:sanctum')->group(function() {
     
     // Asset endpoints
     Route::get('/user-accounts', [AssetController::class, 'getUserAccounts']);
+    Route::post('/add-new-account', [AssetController::class, 'addNewAccount']);
     
     // Goal endpoints
     Route::get('/goal-graphic-rate', [GoalController::class, 'getGoalGraphicRate']);
