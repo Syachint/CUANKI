@@ -61,134 +61,7 @@ class AssetController extends Controller
         }
     }
 
-    public function updateAccountBalance(Request $request)
-    {
-        try {
-            $request->validate([
-                'account_id' => 'required|exists:accounts,id',
-                'type' => 'required|string|in:Kebutuhan,Tabungan,Darurat',
-                'balance_per_type' => 'required|numeric|min:0'
-            ]);
 
-            $user = $request->user();
-            $user->load('accounts.allocations');
-            
-            $accountId = $request->account_id;
-            $type = $request->type;
-            $newBalancePerType = $request->balance_per_type;
-
-            // Verify account belongs to user
-            $account = $user->accounts()->find($accountId);
-            if (!$account) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Account not found or not accessible'
-                ], 403);
-            }
-
-            // Get total number of banks user has
-            $totalBanks = $user->accounts->count();
-
-            // Update or create allocation for this type
-            $allocation = $account->allocations()->where('type', $type)->first();
-            $oldBalancePerType = $allocation ? $allocation->balance_per_type : 0;
-
-            if ($allocation) {
-                $allocation->balance_per_type = $newBalancePerType;
-                $allocation->save();
-            } else {
-                AccountAllocation::create([
-                    'account_id' => $accountId,
-                    'type' => $type,
-                    'balance_per_type' => $newBalancePerType
-                ]);
-            }
-
-            // Calculate current_balance based on number of banks
-            $newCurrentBalance = 0;
-            
-            if ($totalBanks == 1) {
-                // 1 Bank: current_balance = kebutuhan + tabungan
-                $kebutuhanBalance = $account->allocations()->where('type', 'Kebutuhan')->first()->balance_per_type ?? 0;
-                $tabunganBalance = $account->allocations()->where('type', 'Tabungan')->first()->balance_per_type ?? 0;
-                $newCurrentBalance = $kebutuhanBalance + $tabunganBalance;
-                
-            } elseif ($totalBanks == 2) {
-                // 2 Banks: Bank1(kebutuhan) + Bank2(tabungan + darurat)
-                $accounts = $user->accounts->sortBy('id'); // Sort to ensure consistent order
-                
-                if ($account->id == $accounts->first()->id) {
-                    // This is Bank 1 - only kebutuhan
-                    $newCurrentBalance = $account->allocations()->where('type', 'Kebutuhan')->first()->balance_per_type ?? 0;
-                } else {
-                    // This is Bank 2 - tabungan + darurat
-                    $tabunganBalance = $account->allocations()->where('type', 'Tabungan')->first()->balance_per_type ?? 0;
-                    $daruratBalance = $account->allocations()->where('type', 'Darurat')->first()->balance_per_type ?? 0;
-                    $newCurrentBalance = $tabunganBalance + $daruratBalance;
-                }
-                
-            } else {
-                // 3+ Banks: sum all allocations for this account
-                $newCurrentBalance = $account->allocations()->sum('balance_per_type');
-            }
-
-            // Update account current_balance
-            $oldCurrentBalance = $account->current_balance;
-            $account->current_balance = $newCurrentBalance;
-            $account->initial_balance = $newCurrentBalance;
-            $account->save();
-
-            // Handle budget tracking for "Kebutuhan" type
-            $budgetData = null;
-            if ($type === 'Kebutuhan') {
-                // Reset dan update semua budget bulan ini dengan nilai baru
-                $this->resetMonthlyInitialBudget($user->id);
-                $this->updateMonthlyDailyBudget($user->id);
-                $budgetData = $this->handleBudgetTracking($user->id, $accountId, $newBalancePerType);
-            }
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Account balance updated successfully',
-                'data' => [
-                    'account_id' => $accountId,
-                    'account_name' => $account->account_name,
-                    'type' => $type,
-                    'total_banks' => $totalBanks,
-                    'allocation_update' => [
-                        'old_balance_per_type' => $oldBalancePerType,
-                        'new_balance_per_type' => $newBalancePerType,
-                        'balance_change' => $newBalancePerType - $oldBalancePerType
-                    ],
-                    'account_balance' => [
-                        'old_current_balance' => $oldCurrentBalance,
-                        'new_current_balance' => $newCurrentBalance,
-                        'current_balance_change' => $newCurrentBalance - $oldCurrentBalance
-                    ],
-                    'calculation_method' => $this->getCalculationMethod($totalBanks, $account->id, $user->accounts->sortBy('id')),
-                    'budget_tracking' => $budgetData,
-                    'formatted' => [
-                        'type' => ucfirst($type),
-                        'old_balance_per_type' => 'Rp ' . number_format($oldBalancePerType, 0, ',', '.'),
-                        'new_balance_per_type' => 'Rp ' . number_format($newBalancePerType, 0, ',', '.'),
-                        'new_current_balance' => 'Rp ' . number_format($newCurrentBalance, 0, ',', '.')
-                    ]
-                ]
-            ], 200);
-
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error updating account balance: ' . $e->getMessage()
-            ], 500);
-        }
-    }
 
     public function addNewAccount(Request $request) {
         try {
@@ -255,15 +128,18 @@ class AssetController extends Controller
                         'balance_per_type' => 0
                     ]);
                     
-                    // Update Bank A current_balance (only Kebutuhan)
-                    $kebutuhanAllocation = $existingAccount->allocations()->where('type', 'Kebutuhan')->first();
-                    $existingAccount->current_balance = $kebutuhanAllocation ? $kebutuhanAllocation->balance_per_type : 0;
-                    $existingAccount->initial_balance = $existingAccount->current_balance;
+                    // Update Bank A current_balance (sum of all BTP = only Kebutuhan now)
+                    $existingAccount->refresh();
+                    $bankACurrentBalance = $existingAccount->allocations()->sum('balance_per_type');
+                    $existingAccount->current_balance = $bankACurrentBalance;
+                    $existingAccount->initial_balance = max($existingAccount->initial_balance, $bankACurrentBalance);
                     $existingAccount->save();
                     
-                    // Update Bank B current_balance (Tabungan + Darurat)
-                    $newAccount->current_balance = $balancePerType; // Only the requested type has balance
-                    $newAccount->initial_balance = $newAccount->current_balance;
+                    // Update Bank B current_balance (sum of all BTP = only requested type has balance)
+                    $newAccount->refresh();
+                    $bankBCurrentBalance = $newAccount->allocations()->sum('balance_per_type');
+                    $newAccount->current_balance = $bankBCurrentBalance;
+                    $newAccount->initial_balance = max($newAccount->initial_balance, $bankBCurrentBalance);
                     $newAccount->save();
                     
                     $message = "Account added successfully. Bank A now has Kebutuhan only, Bank B has {$type} and {$otherType}.";
@@ -302,10 +178,11 @@ class AssetController extends Controller
                         ->where('type', 'Darurat')
                         ->delete();
                     
-                    // Update Bank B current_balance (only Tabungan now)
-                    $tabunganAllocation = $secondAccount->allocations()->where('type', 'Tabungan')->first();
-                    $secondAccount->current_balance = $tabunganAllocation ? $tabunganAllocation->balance_per_type : 0;
-                    $secondAccount->initial_balance = $secondAccount->current_balance;
+                    // Update Bank B current_balance (sum of all BTP = only Tabungan now)
+                    $secondAccount->refresh();
+                    $bankBCurrentBalance = $secondAccount->allocations()->sum('balance_per_type');
+                    $secondAccount->current_balance = $bankBCurrentBalance;
+                    $secondAccount->initial_balance = max($secondAccount->initial_balance, $bankBCurrentBalance);
                     $secondAccount->save();
                     
                     $message = "Account added successfully. Darurat moved from Bank B to new Bank C.";
@@ -325,8 +202,8 @@ class AssetController extends Controller
                     'user_id' => $user->id,
                     // 'account_name' => $accountName,
                     'bank_id' => $bankId,
-                    'current_balance' => $balancePerType,
-                    'initial_balance' => $balancePerType
+                    'current_balance' => 0, // Will be calculated after allocation created
+                    'initial_balance' => 0
                 ]);
                 
                 // Add allocation for the requested type
@@ -335,6 +212,13 @@ class AssetController extends Controller
                     'type' => $type,
                     'balance_per_type' => $balancePerType
                 ]);
+                
+                // Update account balance after allocation created
+                $newAccount->refresh();
+                $calculatedBalance = $newAccount->allocations()->sum('balance_per_type');
+                $newAccount->current_balance = $calculatedBalance;
+                $newAccount->initial_balance = max($newAccount->initial_balance, $calculatedBalance);
+                $newAccount->save();
                 
                 $message = "Account added successfully with {$type} type.";
                 $createdAccount = $newAccount;
@@ -606,13 +490,21 @@ class AssetController extends Controller
                     ];
                 }
 
-                // Recalculate all account balances
+                // Recalculate all account balances with smart initial_balance logic
                 foreach ($userAccounts as $account) {
                     $account->refresh();
                     $totalBalance = $account->allocations()->sum('balance_per_type');
+                    
+                    // Update current_balance (always = sum of all BTP)
+                    $newCurrentBalance = $totalBalance;
+                    
+                    // Update initial_balance only if current_balance > initial_balance
+                    // initial_balance = highest ever current_balance (peak balance)
+                    $newInitialBalance = max($account->initial_balance, $newCurrentBalance);
+                    
                     $account->update([
-                        'current_balance' => $totalBalance
-                        // 'initial_balance' => $totalBalance
+                        'current_balance' => $newCurrentBalance,
+                        'initial_balance' => $newInitialBalance
                     ]);
                 }
 
@@ -691,6 +583,293 @@ class AssetController extends Controller
                 'message' => 'Error updating account allocation: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Get usage bar for all allocations showing current vs initial amounts
+     * Tabungan: Always full (savings only grow)
+     * Kebutuhan: Shows usage based on expenses 
+     * Darurat: Always full (emergency funds not used)
+     */
+    public function getUsageBarAllocation(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $userId = $user->id;
+
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ], 404);
+            }
+
+            // Get user accounts with allocations and bank info
+            $accounts = Account::where('user_id', $userId)
+                ->with(['allocations', 'bank'])
+                ->orderBy('id')
+                ->get();
+
+            if ($accounts->isEmpty()) {
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'No accounts found',
+                    'data' => [
+                        'allocations' => [],
+                        'total_accounts' => 0
+                    ]
+                ], 200);
+            }
+
+            // Get all allocations with usage calculations
+            $allocationBars = collect();
+
+            foreach ($accounts as $account) {
+                foreach ($account->allocations as $allocation) {
+                    $currentBalance = (float) $allocation->balance_per_type;
+                    $bankName = $account->bank->code_name ?? 'Unknown Bank';
+                    
+                    // Calculate usage percentage based on type
+                    if ($allocation->type === 'Tabungan') {
+                        // Tabungan: Calculate based on current vs previous balance
+                        // Get the previous balance_per_type (last record before today)
+                        $today = now()->toDateString();
+                        
+                        $previousAllocation = AccountAllocation::where('account_id', $account->id)
+                            ->where('type', 'Tabungan')
+                            ->where('allocation_date', '<', $today)
+                            ->orderBy('allocation_date', 'desc')
+                            ->orderBy('updated_at', 'desc')
+                            ->first();
+                        
+                        $maxBalance = $previousAllocation ? $previousAllocation->balance_per_type : $currentBalance;
+                        
+                        // If current balance is higher than previous, use current as max (savings increased)
+                        if ($currentBalance > $maxBalance) {
+                            $maxBalance = $currentBalance;
+                        }
+                        
+                        // Calculate usage percentage: current/max * 100
+                        if ($maxBalance > 0) {
+                            $usagePercentage = ($currentBalance / $maxBalance) * 100;
+                            $usagePercentage = max(0, min(100, $usagePercentage));
+                            
+                            if ($usagePercentage >= 90) {
+                                $status = 'full';
+                                $statusText = 'Tabungan Optimal';
+                                $description = $currentBalance >= $maxBalance ? 
+                                    'Dana tabungan bertambah' : 
+                                    'Tabungan masih sangat aman';
+                            } elseif ($usagePercentage >= 70) {
+                                $status = 'high';
+                                $statusText = 'Tabungan Baik';
+                                $usedAmount = $maxBalance - $currentBalance;
+                                $description = $usedAmount > 0 ? 
+                                    "Tabungan berkurang Rp" . number_format($usedAmount, 0, ',', '.') :
+                                    'Tabungan stabil';
+                            } elseif ($usagePercentage >= 40) {
+                                $status = 'medium';
+                                $statusText = 'Tabungan Sedang';
+                                $usedAmount = $maxBalance - $currentBalance;
+                                $description = "Tabungan berkurang Rp" . number_format($usedAmount, 0, ',', '.');
+                            } elseif ($usagePercentage >= 20) {
+                                $status = 'low';
+                                $statusText = 'Tabungan Sedikit';
+                                $usedAmount = $maxBalance - $currentBalance;
+                                $description = "Tabungan berkurang Rp" . number_format($usedAmount, 0, ',', '.');
+                            } else {
+                                $status = 'critical';
+                                $statusText = 'Tabungan Hampir Habis';
+                                $usedAmount = $maxBalance - $currentBalance;
+                                $description = "Tabungan berkurang Rp" . number_format($usedAmount, 0, ',', '.');
+                            }
+                        } else {
+                            $usagePercentage = 0;
+                            $status = 'empty';
+                            $statusText = 'Tidak Ada Tabungan';
+                            $description = 'Tabungan belum ada';
+                        }
+                        
+                    } elseif ($allocation->type === 'Kebutuhan') {
+                        // Kebutuhan: Calculate usage based on expenses
+                        // Get initial budget vs current balance
+                        $today = now()->toDateString();
+                        
+                        // Get today's budget for this account
+                        $todayBudget = \App\Models\Budget::where('user_id', $userId)
+                            ->where('account_id', $account->id)
+                            ->whereDate('created_at', $today)
+                            ->first();
+                        
+                        $initialBudget = $todayBudget ? $todayBudget->initial_daily_budget : $currentBalance;
+                        
+                        if ($initialBudget > 0) {
+                            $usagePercentage = ($currentBalance / $initialBudget) * 100;
+                            $usagePercentage = max(0, min(100, $usagePercentage)); // Clamp between 0-100
+                            
+                            if ($usagePercentage >= 80) {
+                                $status = 'high';
+                                $statusText = 'Sisa Banyak';
+                            } elseif ($usagePercentage >= 50) {
+                                $status = 'medium';
+                                $statusText = 'Sisa Sedang';
+                            } elseif ($usagePercentage >= 20) {
+                                $status = 'low';
+                                $statusText = 'Sisa Sedikit';
+                            } else {
+                                $status = 'critical';
+                                $statusText = 'Hampir Habis';
+                            }
+                            
+                            $usedAmount = $initialBudget - $currentBalance;
+                            $description = $usedAmount > 0 ? 
+                                "Telah digunakan Rp" . number_format($usedAmount, 0, ',', '.') :
+                                "Belum ada pengeluaran hari ini";
+                        } else {
+                            $usagePercentage = 0;
+                            $status = 'empty';
+                            $statusText = 'Tidak Ada Dana';
+                            $description = 'Budget belum diatur';
+                        }
+                        
+                    } elseif ($allocation->type === 'Darurat') {
+                        // Darurat: Always 100% (emergency funds preserved)
+                        $usagePercentage = 100;
+                        $status = 'full';
+                        $statusText = 'Dana Darurat Aman';
+                        $description = 'Dana darurat terjaga dengan baik';
+                        
+                    } else {
+                        // Default case
+                        $usagePercentage = 100;
+                        $status = 'full';
+                        $statusText = 'Normal';
+                        $description = 'Status normal';
+                    }
+
+                    $allocationBars->push([
+                        'allocation_id' => $allocation->id,
+                        'account_id' => $account->id,
+                        'bank_name' => $bankName,
+                        'bank_code' => $account->bank->code_name ?? 'UNK',
+                        'type' => $allocation->type,
+                        'current_balance' => $currentBalance,
+                        'max_balance' => $allocation->type === 'Tabungan' && isset($maxBalance) ? $maxBalance : 
+                                        ($allocation->type === 'Kebutuhan' && isset($initialBudget) ? $initialBudget : $currentBalance),
+                        'usage_percentage' => round($usagePercentage, 1),
+                        'status' => $status,
+                        'status_text' => $statusText,
+                        'description' => $description,
+                        'color_scheme' => $this->getColorScheme($allocation->type, $status),
+                        'formatted' => [
+                            'current_balance' => 'Rp' . number_format($currentBalance, 0, ',', '.'),
+                            'max_balance' => 'Rp' . number_format(
+                                $allocation->type === 'Tabungan' && isset($maxBalance) ? $maxBalance : 
+                                ($allocation->type === 'Kebutuhan' && isset($initialBudget) ? $initialBudget : $currentBalance), 
+                                0, ',', '.'
+                            ),
+                            'usage_text' => round($usagePercentage, 0) . '%',
+                            'display_text' => $bankName . ' - ' . $allocation->type,
+                            'balance_display' => 'Rp' . number_format($currentBalance, 0, ',', '.') . '/Rp' . 
+                                number_format(
+                                    $allocation->type === 'Tabungan' && isset($maxBalance) ? $maxBalance : 
+                                    ($allocation->type === 'Kebutuhan' && isset($initialBudget) ? $initialBudget : $currentBalance), 
+                                    0, ',', '.'
+                                )
+                        ],
+                        'last_updated' => $allocation->updated_at->format('Y-m-d H:i:s')
+                    ]);
+                }
+            }
+
+            // Sort by type priority: Kebutuhan, Tabungan, Darurat
+            $sortedAllocations = $allocationBars->sortBy(function($item) {
+                $typePriority = [
+                    'Kebutuhan' => 1,
+                    'Tabungan' => 2, 
+                    'Darurat' => 3
+                ];
+                return $typePriority[$item['type']] ?? 4;
+            })->values();
+
+            // Calculate summary statistics
+            $totalBalance = $allocationBars->sum('current_balance');
+            $averageUsage = $allocationBars->avg('usage_percentage');
+            
+            $statusCounts = $allocationBars->groupBy('status')->map->count();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Usage bar allocations retrieved successfully',
+                'data' => [
+                    'allocations' => $sortedAllocations,
+                    'summary' => [
+                        'total_allocations' => $allocationBars->count(),
+                        'total_balance' => $totalBalance,
+                        'average_usage_percentage' => round($averageUsage, 1),
+                        'status_distribution' => [
+                            'full' => $statusCounts['full'] ?? 0,
+                            'high' => $statusCounts['high'] ?? 0,
+                            'medium' => $statusCounts['medium'] ?? 0,
+                            'low' => $statusCounts['low'] ?? 0,
+                            'critical' => $statusCounts['critical'] ?? 0,
+                            'empty' => $statusCounts['empty'] ?? 0
+                        ],
+                        'formatted' => [
+                            'total_balance' => 'Rp ' . number_format($totalBalance, 0, ',', '.'),
+                            'average_usage' => round($averageUsage, 1) . '%'
+                        ]
+                    ],
+                    'metadata' => [
+                        'generated_at' => now()->format('Y-m-d H:i:s'),
+                        'timezone' => 'Asia/Jakarta',
+                        'total_accounts' => $accounts->count()
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error retrieving usage bar allocations: ' . $e->getMessage(),
+                'debug' => [
+                    'user_id' => $user->id ?? 'unknown'
+                ]
+            ], 500);
+        }
+    }
+
+    /**
+     * Get color scheme for allocation based on type and status
+     */
+    private function getColorScheme($type, $status)
+    {
+        $colorSchemes = [
+            'Tabungan' => [
+                'full' => ['primary' => '#10B981', 'secondary' => '#D1FAE5', 'text' => '#047857'],
+                'high' => ['primary' => '#059669', 'secondary' => '#CCFBF1', 'text' => '#065F46'],
+                'medium' => ['primary' => '#F59E0B', 'secondary' => '#FEF3C7', 'text' => '#92400E'],
+                'low' => ['primary' => '#EF4444', 'secondary' => '#FEE2E2', 'text' => '#DC2626'],
+                'critical' => ['primary' => '#DC2626', 'secondary' => '#FEE2E2', 'text' => '#991B1B'],
+                'empty' => ['primary' => '#6B7280', 'secondary' => '#F3F4F6', 'text' => '#374151'],
+                'default' => ['primary' => '#10B981', 'secondary' => '#D1FAE5', 'text' => '#047857']
+            ],
+            'Kebutuhan' => [
+                'high' => ['primary' => '#10B981', 'secondary' => '#D1FAE5', 'text' => '#047857'],
+                'medium' => ['primary' => '#F59E0B', 'secondary' => '#FEF3C7', 'text' => '#92400E'],
+                'low' => ['primary' => '#EF4444', 'secondary' => '#FEE2E2', 'text' => '#DC2626'],
+                'critical' => ['primary' => '#DC2626', 'secondary' => '#FEE2E2', 'text' => '#991B1B'],
+                'empty' => ['primary' => '#6B7280', 'secondary' => '#F3F4F6', 'text' => '#374151'],
+                'default' => ['primary' => '#6366F1', 'secondary' => '#E0E7FF', 'text' => '#4338CA']
+            ],
+            'Darurat' => [
+                'full' => ['primary' => '#8B5CF6', 'secondary' => '#EDE9FE', 'text' => '#6D28D9'],
+                'default' => ['primary' => '#8B5CF6', 'secondary' => '#EDE9FE', 'text' => '#6D28D9']
+            ]
+        ];
+
+        return $colorSchemes[$type][$status] ?? $colorSchemes[$type]['default'] ?? 
+               ['primary' => '#6B7280', 'secondary' => '#F3F4F6', 'text' => '#374151'];
     }
 
     // Helper methods (add these if not exists)
