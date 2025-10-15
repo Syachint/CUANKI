@@ -14,14 +14,14 @@ return new class extends Migration
         Schema::create('goals', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('user_id');
-            $table->unsignedBigInteger('account_id');
+            $table->unsignedBigInteger('account_allocation_id');
             $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
-            $table->foreign('account_id')->references('id')->on('accounts')->onDelete('cascade');
+            $table->foreign('account_allocation_id')->references('id')->on('accounts_allocation')->onDelete('cascade');
             $table->boolean('is_first')->default(false);
-            $table->decimal('target_amount', 15, 2)->nullable();
-            $table->date('target_deadline');
+            $table->decimal('target_amount', 15, 2); // NOT NULL - wajib diisi dari input user
+            $table->date('target_deadline')->nullable(); // NULLABLE - bisa tanpa tenggat waktu
             $table->string('goal_name');
-            $table->decimal('goal_amount', 15, 2);
+            // goal_amount DIHAPUS - current amount diambil dari balance_per_type
             $table->boolean('is_goal_achieved')->default(false);
             $table->timestamps();
         });

@@ -62,7 +62,14 @@ Route::middleware('auth:sanctum')->group(function() {
 
     // Goal endpoints
     Route::get('/goal-graphic-rate', [GoalController::class, 'getGoalGraphicRate']);
-    Route::get('/goal-graphic-rate?period={period}', [GoalController::class, 'getGoalGraphicRate']);
+    Route::get('/main-goal-progress', [GoalController::class, 'getMainGoalProgress']);
+    // Goals CRUD
+    Route::get('/goals/available-allocations', [GoalController::class, 'getAvailableAllocations']);
+    Route::get('/goals', [GoalController::class, 'getAllGoals']);
+    Route::post('/goals', [GoalController::class, 'createGoal']);
+    Route::get('/goals/{id}', [GoalController::class, 'getGoal']);
+    Route::put('/goals/{id}', [GoalController::class, 'updateGoal']);
+    Route::delete('/goals/{id}', [GoalController::class, 'deleteGoal']);
 
     // Advice endpoints
     Route::get('/advice', [AdviceController::class, 'getAdvices']);
