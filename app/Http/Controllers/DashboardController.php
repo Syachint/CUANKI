@@ -9,6 +9,7 @@ use App\Models\AccountAllocation;
 use App\Models\UserFinancePlan;
 use App\Models\Budget;
 use App\Models\Expense;
+use App\Models\Income;
 use App\Models\BankData;
 use Carbon\Carbon;
 
@@ -454,60 +455,86 @@ class DashboardController extends Controller
                 ], 404);
             }
 
-            // Get today's date in multiple formats for debugging
-            $today = $this->now()->toDateString(); // 2025-10-14
-            $todayStart = $this->now()->startOfDay(); // 2025-10-14 00:00:00
-            $todayEnd = $this->now()->endOfDay(); // 2025-10-14 23:59:59
+            // Get today's date
+            $today = $this->now()->toDateString();
+            $todayStart = $this->now()->startOfDay();
+            $todayEnd = $this->now()->endOfDay();
             
-            // Debug: Check all expenses for this user first
-            $allExpenses = Expense::where('user_id', $userId)->get();
-            
-            // Try multiple date filter approaches
+            // Get today's expenses with category and account info
             $todayExpenses = Expense::where('user_id', $userId)
                 ->where(function($query) use ($today, $todayStart, $todayEnd) {
                     $query->whereDate('expense_date', $today)
                           ->orWhereBetween('expense_date', [$todayStart, $todayEnd])
                           ->orWhereDate('created_at', $today);
                 })
-                ->with(['category'])
+                ->with(['category', 'account.bank'])
                 ->orderBy('created_at', 'desc')
                 ->get();
 
-            // If still no results, get recent expenses instead
-            if ($todayExpenses->isEmpty()) {
-                $todayExpenses = Expense::where('user_id', $userId)
-                    ->with(['category'])
-                    ->orderBy('created_at', 'desc')
-                    ->take(10) // Get latest 10 expenses
-                    ->get();
-            }
+            // Get today's incomes with account info
+            $todayIncomes = Income::where('user_id', $userId)
+                ->where(function($query) use ($today, $todayStart, $todayEnd) {
+                    $query->whereDate('received_date', $today)
+                          ->orWhereBetween('received_date', [$todayStart, $todayEnd])
+                          ->orWhereDate('created_at', $today);
+                })
+                ->with(['account.bank'])
+                ->orderBy('created_at', 'desc')
+                ->get();
 
-            // Calculate total expenses
+            // Calculate totals
             $totalExpenses = $todayExpenses->sum('amount');
+            $totalIncomes = $todayIncomes->sum('amount');
 
-            // Format expenses list
-            $expenses = $todayExpenses->map(function ($expense) {
+            // Format expenses list with created_at timestamp for sorting
+            $expenseTransactions = $todayExpenses->map(function ($expense) {
                 return [
                     'id' => $expense->id,
                     'category_name' => $expense->category ? $expense->category->name : 'Tanpa Kategori',
                     'note' => $expense->note ?: 'Tidak ada catatan',
                     'amount' => $expense->amount,
-                    'is_income' => false, // Semua adalah expense (negatif)
+                    'is_income' => false,
                     'expense_time' => $expense->created_at->format('H:i'),
                     'expense_date_raw' => $expense->expense_date,
-                    'formatted_amount' => '-' . number_format($expense->amount, 0, ',', '.')
+                    'formatted_amount' => '-' . number_format($expense->amount, 0, ',', '.'),
+                    'created_at_timestamp' => $expense->created_at->timestamp
                 ];
             });
+
+            // Format incomes list with created_at timestamp for sorting
+            $incomeTransactions = $todayIncomes->map(function ($income) {
+                return [
+                    'id' => $income->id,
+                    'category_name' => $income->income_source ?: 'Pemasukan',
+                    'note' => $income->note ?: 'Tidak ada catatan',
+                    'amount' => $income->amount,
+                    'is_income' => true,
+                    'expense_time' => $income->created_at->format('H:i'),
+                    'expense_date_raw' => $income->received_date,
+                    'formatted_amount' => '+' . number_format($income->amount, 0, ',', '.'),
+                    'created_at_timestamp' => $income->created_at->timestamp
+                ];
+            });
+
+            // Combine and sort all transactions by created_at timestamp desc (newest first)
+            $allTransactions = $expenseTransactions->concat($incomeTransactions)
+                ->sortByDesc('created_at_timestamp')
+                ->map(function($transaction) {
+                    // Remove timestamp dari response final
+                    unset($transaction['created_at_timestamp']);
+                    return $transaction;
+                })
+                ->values();
 
             return response()->json([
                 'status' => 'success',
                 'data' => [
                     'date' => $today,
                     'total_expenses' => $totalExpenses,
-                    'total_transactions' => $todayExpenses->count(),
+                    'total_transactions' => $todayIncomes->count() + $todayExpenses->count(),
                     'formatted_date' => Carbon::parse($today)->format('d M Y'),
                     'formatted_total_expenses' => 'Rp ' . number_format($totalExpenses, 0, ',', '.'),
-                    'transactions' => $expenses,
+                    'transactions' => $allTransactions,
                 ]
             ], 200);
 

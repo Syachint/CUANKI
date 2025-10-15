@@ -86,12 +86,10 @@ class TransactionController extends Controller
                 'initial_balance' => max($account->initial_balance, $newCurrentBalance)
             ]);
 
-            // Update daily budget if allocation type is "Kebutuhan"
+            // Update or create budget if allocation type is "Kebutuhan"
             $budgetData = null;
             if ($allocationType === 'Kebutuhan') {
-                // Get total kebutuhan balance from all accounts
-                $totalKebutuhanBalance = $this->getTotalKebutuhanBalance($user->id);
-                $budgetData = $this->updateDailyBudgetFromIncome($user->id, $request->total, $totalKebutuhanBalance);
+                $budgetData = $this->updateBudgetFromIncome($user->id, $account->id, $allocation->balance_per_type);
             }
 
             return response()->json([
@@ -234,12 +232,10 @@ class TransactionController extends Controller
                 'initial_balance' => max($account->initial_balance, $newCurrentBalance)
             ]);
 
-            // Update daily budget if allocation type is "Kebutuhan"
+            // Update budget if allocation type is "Kebutuhan"
             $budgetData = null;
             if ($allocationType === 'Kebutuhan') {
-                // Get total kebutuhan balance from all accounts after expense
-                $totalKebutuhanBalance = $this->getTotalKebutuhanBalance($user->id);
-                $budgetData = $this->updateDailyBudgetFromExpense($user->id, $request->total, $totalKebutuhanBalance);
+                $budgetData = $this->updateBudgetFromExpense($user->id, $account->id, $request->total, $allocation->balance_per_type);
             }
 
             return response()->json([
@@ -293,144 +289,6 @@ class TransactionController extends Controller
                 'status' => 'error',
                 'message' => 'Error adding expense: ' . $e->getMessage()
             ], 500);
-        }
-    }
-
-    /**
-     * Get total kebutuhan balance from all user accounts
-     */
-    private function getTotalKebutuhanBalance($userId)
-    {
-        return AccountAllocation::whereHas('account', function($query) use ($userId) {
-            $query->where('user_id', $userId);
-        })
-        ->where('type', 'Kebutuhan')
-        ->sum('balance_per_type');
-    }
-
-    /**
-     * Update daily budget after income added to kebutuhan
-     */
-    private function updateDailyBudgetFromIncome($userId, $incomeAmount, $totalKebutuhanBalance)
-    {
-        try {
-            // Get current month details - total days in month
-            $daysInMonth = $this->now()->daysInMonth;
-            
-            // Calculate new daily budget from total kebutuhan balance
-            $newDailyBudget = $daysInMonth > 0 ? round($totalKebutuhanBalance / $daysInMonth, 0) : 0;
-
-            // Get today's date
-            $today = $this->now()->toDateString();
-            
-            // Update all today's budgets for all user accounts with kebutuhan
-            $accountIds = Account::where('user_id', $userId)
-                ->whereHas('allocations', function($query) {
-                    $query->where('type', 'Kebutuhan');
-                })
-                ->pluck('id');
-
-            $budgetsUpdated = 0;
-            $totalOldDailyBudget = 0;
-
-            foreach ($accountIds as $accountId) {
-                $existingBudget = Budget::where('user_id', $userId)
-                    ->where('account_id', $accountId)
-                    ->whereDate('created_at', $today)
-                    ->first();
-
-                if ($existingBudget) {
-                    $totalOldDailyBudget += $existingBudget->daily_budget;
-                    $existingBudget->daily_budget += round($incomeAmount / $daysInMonth, 0);
-                    $existingBudget->save();
-                    $budgetsUpdated++;
-                }
-            }
-
-            return [
-                'action' => 'income_added_to_kebutuhan',
-                'income_amount' => $incomeAmount,
-                'total_kebutuhan_balance' => $totalKebutuhanBalance,
-                'daily_budget_increase_per_account' => round($incomeAmount / $daysInMonth, 0),
-                'accounts_updated' => $budgetsUpdated,
-                'days_in_month' => $daysInMonth,
-                'formatted' => [
-                    'income_amount' => 'Rp ' . number_format($incomeAmount, 0, ',', '.'),
-                    'total_kebutuhan_balance' => 'Rp ' . number_format($totalKebutuhanBalance, 0, ',', '.'),
-                    'daily_budget_increase' => 'Rp ' . number_format(round($incomeAmount / $daysInMonth, 0), 0, ',', '.'),
-                    'accounts_updated' => $budgetsUpdated . ' account(s)'
-                ]
-            ];
-
-        } catch (\Exception $e) {
-            return [
-                'error' => 'Failed to update daily budget from income: ' . $e->getMessage(),
-                'action' => 'failed'
-            ];
-        }
-    }
-
-    /**
-     * Update daily budget after expense from kebutuhan
-     */
-    private function updateDailyBudgetFromExpense($userId, $expenseAmount, $totalKebutuhanBalance)
-    {
-        try {
-            // Get current month details - total days in month
-            $daysInMonth = $this->now()->daysInMonth;
-
-            // Get today's date
-            $today = $this->now()->toDateString();
-            
-            // Find the account that had the expense (should have budget for today)
-            $todayBudgets = Budget::where('user_id', $userId)
-                ->whereDate('created_at', $today)
-                ->get();
-
-            $budgetsUpdated = 0;
-            $totalBudgetDecrease = 0;
-
-            foreach ($todayBudgets as $budget) {
-                if ($budget->daily_budget >= $expenseAmount) {
-                    // Deduct from this budget
-                    $budget->daily_budget -= $expenseAmount;
-                    $budget->save();
-                    $budgetsUpdated++;
-                    $totalBudgetDecrease += $expenseAmount;
-                    break; // Only deduct from one budget
-                } else {
-                    // Deduct what we can and continue to next budget
-                    $deductAmount = $budget->daily_budget;
-                    $budget->daily_budget = 0;
-                    $budget->save();
-                    $expenseAmount -= $deductAmount;
-                    $totalBudgetDecrease += $deductAmount;
-                    $budgetsUpdated++;
-                    
-                    if ($expenseAmount <= 0) break;
-                }
-            }
-
-            return [
-                'action' => 'expense_deducted_from_kebutuhan',
-                'expense_amount' => $totalBudgetDecrease,
-                'total_kebutuhan_balance' => $totalKebutuhanBalance,
-                'daily_budget_decrease' => $totalBudgetDecrease,
-                'accounts_updated' => $budgetsUpdated,
-                'days_in_month' => $daysInMonth,
-                'formatted' => [
-                    'expense_amount' => 'Rp ' . number_format($totalBudgetDecrease, 0, ',', '.'),
-                    'total_kebutuhan_balance' => 'Rp ' . number_format($totalKebutuhanBalance, 0, ',', '.'),
-                    'daily_budget_decrease' => 'Rp ' . number_format($totalBudgetDecrease, 0, ',', '.'),
-                    'accounts_updated' => $budgetsUpdated . ' account(s)'
-                ]
-            ];
-
-        } catch (\Exception $e) {
-            return [
-                'error' => 'Failed to update daily budget from expense: ' . $e->getMessage(),
-                'action' => 'failed'
-            ];
         }
     }
 
