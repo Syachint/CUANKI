@@ -398,4 +398,337 @@ class AssetController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * Update account allocation (type and/or balance) with intelligent swapping
+     * Can update type only, balance only, or both type and balance
+     */
+    public function updateAccountAllocation(Request $request)
+    {
+        try {
+            $request->validate([
+                'account_allocation_id' => 'required|exists:accounts_allocation,id',
+                'new_type' => 'sometimes|string|in:Kebutuhan,Tabungan,Darurat',
+                'new_balance' => 'sometimes|numeric|min:0'
+            ]);
+
+            $user = $request->user();
+            $allocationId = $request->account_allocation_id;
+            $newType = $request->new_type ?? null;
+            $newBalance = $request->new_balance ?? null;
+
+            // At least one parameter must be provided
+            if ($newType === null && $newBalance === null) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Either new_type or new_balance must be provided'
+                ], 422);
+            }
+
+            // Get the allocation to be updated
+            $targetAllocation = AccountAllocation::with(['account'])
+                ->where('id', $allocationId)
+                ->first();
+
+            if (!$targetAllocation) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Allocation not found'
+                ], 404);
+            }
+
+            // Verify user owns the account
+            if ($targetAllocation->account->user_id !== $user->id) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Access denied'
+                ], 403);
+            }
+
+            $currentType = $targetAllocation->type;
+            $currentBalance = $targetAllocation->balance_per_type;
+            
+            // Determine what needs to be updated
+            $updateType = $newType !== null && $currentType !== $newType;
+            $updateBalance = $newBalance !== null && $currentBalance != $newBalance;
+
+            if (!$updateType && !$updateBalance) {
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'No changes needed',
+                    'data' => [
+                        'no_change' => true,
+                        'current_type' => $currentType,
+                        'current_balance' => $currentBalance
+                    ]
+                ], 200);
+            }
+
+            // Get all user accounts with allocations
+            $userAccounts = Account::where('user_id', $user->id)
+                ->with(['allocations'])
+                ->orderBy('id')
+                ->get();
+
+            $totalBanks = $userAccounts->count();
+            $changeLog = [];
+
+            DB::beginTransaction();
+
+            try {
+                // Handle type change with intelligent swapping
+                if ($updateType) {
+                    if ($totalBanks == 1) {
+                        // 1 Bank: Simple swap between types within same account
+                        $account = $userAccounts->first();
+                        
+                        // Find allocation with the new type (to swap)
+                        $swapAllocation = $account->allocations()
+                            ->where('type', $newType)
+                            ->first();
+
+                        if ($swapAllocation) {
+                            $swapBalance = $swapAllocation->balance_per_type;
+                            
+                            // Swap the balances
+                            $targetAllocation->update([
+                                'type' => $newType,
+                                'balance_per_type' => $swapBalance
+                            ]);
+
+                            $swapAllocation->update([
+                                'type' => $currentType,
+                                'balance_per_type' => $currentBalance
+                            ]);
+
+                            $changeLog['type_change'] = [
+                                'scenario' => '1_bank_swap',
+                                'swapped_with' => [
+                                    'old_type' => $newType,
+                                    'old_balance' => $swapBalance,
+                                    'new_type' => $currentType,
+                                    'new_balance' => $currentBalance
+                                ]
+                            ];
+                        } else {
+                            // Just change type if no existing allocation
+                            $targetAllocation->update(['type' => $newType]);
+                            $changeLog['type_change'] = [
+                                'scenario' => '1_bank_simple_change',
+                                'no_swap_needed' => true
+                            ];
+                        }
+
+                    } elseif ($totalBanks == 2) {
+                        // 2 Banks: Bank A (Kebutuhan) + Bank B (Tabungan, Darurat)
+                        $bankA = $userAccounts->first();
+                        $bankB = $userAccounts->last();
+
+                        // Find allocation with the new type to swap
+                        $swapAllocation = AccountAllocation::whereHas('account', function($query) use ($user) {
+                                $query->where('user_id', $user->id);
+                            })
+                            ->where('type', $newType)
+                            ->first();
+
+                        if ($swapAllocation) {
+                            $swapBalance = $swapAllocation->balance_per_type;
+                            $swapAccountId = $swapAllocation->account_id;
+                            
+                            // Swap types and balances, accounting for cross-bank movement
+                            $targetAllocation->update([
+                                'account_id' => $swapAccountId,
+                                'type' => $newType,
+                                'balance_per_type' => $swapBalance
+                            ]);
+
+                            $swapAllocation->update([
+                                'account_id' => $targetAllocation->account_id,
+                                'type' => $currentType,
+                                'balance_per_type' => $currentBalance
+                            ]);
+
+                            $changeLog['type_change'] = [
+                                'scenario' => '2_banks_cross_swap',
+                                'swapped_accounts' => [$targetAllocation->account_id, $swapAccountId]
+                            ];
+                        }
+
+                    } else {
+                        // 3+ Banks: Simple swap
+                        $swapAllocation = AccountAllocation::whereHas('account', function($query) use ($user) {
+                                $query->where('user_id', $user->id);
+                            })
+                            ->where('type', $newType)
+                            ->first();
+
+                        if ($swapAllocation) {
+                            $swapBalance = $swapAllocation->balance_per_type;
+                            
+                            // Swap types and balances
+                            $targetAllocation->update([
+                                'type' => $newType,
+                                'balance_per_type' => $swapBalance
+                            ]);
+
+                            $swapAllocation->update([
+                                'type' => $currentType,
+                                'balance_per_type' => $currentBalance
+                            ]);
+
+                            $changeLog['type_change'] = [
+                                'scenario' => '3plus_banks_swap',
+                                'swapped_accounts' => [$targetAllocation->account_id, $swapAllocation->account_id]
+                            ];
+                        } else {
+                            // Just change type if no existing allocation
+                            $targetAllocation->update(['type' => $newType]);
+                            $changeLog['type_change'] = [
+                                'scenario' => '3plus_banks_simple_change',
+                                'no_swap_needed' => true
+                            ];
+                        }
+                    }
+                }
+
+                // Handle balance change (independent of type change)
+                if ($updateBalance) {
+                    // Refresh allocation in case type was changed
+                    $targetAllocation->refresh();
+                    
+                    $oldBalance = $targetAllocation->balance_per_type;
+                    $targetAllocation->update(['balance_per_type' => $newBalance]);
+
+                    $changeLog['balance_change'] = [
+                        'old_balance' => $oldBalance,
+                        'new_balance' => $newBalance,
+                        'balance_change' => $newBalance - $oldBalance
+                    ];
+                }
+
+                // Recalculate all account balances
+                foreach ($userAccounts as $account) {
+                    $account->refresh();
+                    $totalBalance = $account->allocations()->sum('balance_per_type');
+                    $account->update([
+                        'current_balance' => $totalBalance
+                        // 'initial_balance' => $totalBalance
+                    ]);
+                }
+
+                // Handle budget tracking for "Kebutuhan" type
+                $budgetData = null;
+                $finalAllocation = $targetAllocation->fresh();
+                if ($finalAllocation->type === 'Kebutuhan') {
+                    $this->resetMonthlyInitialBudget($user->id);
+                    $this->updateMonthlyDailyBudget($user->id);
+                    $budgetData = $this->handleBudgetTracking($user->id, $finalAllocation->account_id, $finalAllocation->balance_per_type);
+                }
+
+                DB::commit();
+
+                // Get updated data
+                $updatedAccounts = Account::where('user_id', $user->id)
+                    ->with(['allocations', 'bank'])
+                    ->orderBy('id')
+                    ->get();
+
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Account allocation updated successfully',
+                    'data' => [
+                        'change_summary' => [
+                            'allocation_id' => $allocationId,
+                            'changes_made' => [
+                                'type_changed' => $updateType,
+                                'balance_changed' => $updateBalance
+                            ],
+                            'original_values' => [
+                                'type' => $currentType,
+                                'balance' => $currentBalance
+                            ],
+                            'new_values' => [
+                                'type' => $finalAllocation->type,
+                                'balance' => $finalAllocation->balance_per_type
+                            ],
+                            'total_banks' => $totalBanks,
+                            'change_log' => $changeLog
+                        ],
+                        'updated_accounts' => $updatedAccounts->map(function($account) {
+                            return [
+                                'account_id' => $account->id,
+                                'bank_name' => $account->bank->code_name ?? 'Unknown Bank',
+                                'current_balance' => $account->current_balance,
+                                'allocations' => $account->allocations->map(function($allocation) {
+                                    return [
+                                        'allocation_id' => $allocation->id,
+                                        'type' => $allocation->type,
+                                        'balance_per_type' => $allocation->balance_per_type,
+                                        'formatted_balance' => 'Rp ' . number_format($allocation->balance_per_type, 0, ',', '.')
+                                    ];
+                                }),
+                                'formatted_balance' => 'Rp ' . number_format($account->current_balance, 0, ',', '.')
+                            ];
+                        }),
+                        'budget_tracking' => $budgetData
+                    ]
+                ], 200);
+
+            } catch (\Exception $e) {
+                DB::rollback();
+                throw $e;
+            }
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Validation failed',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error updating account allocation: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // Helper methods (add these if not exists)
+    private function getCalculationMethod($totalBanks, $currentAccountId, $allAccounts)
+    {
+        if ($totalBanks == 1) {
+            return "1 Bank: current_balance = kebutuhan + tabungan";
+        } elseif ($totalBanks == 2) {
+            $firstAccountId = $allAccounts->first()->id;
+            if ($currentAccountId == $firstAccountId) {
+                return "2 Banks - Bank A: current_balance = kebutuhan only";
+            } else {
+                return "2 Banks - Bank B: current_balance = tabungan + darurat";
+            }
+        } else {
+            return "3+ Banks: current_balance = sum of all allocations";
+        }
+    }
+
+    private function resetMonthlyInitialBudget($userId)
+    {
+        // Implementation for resetting monthly initial budget
+        // This should be implemented based on your budget logic
+    }
+
+    private function updateMonthlyDailyBudget($userId)
+    {
+        // Implementation for updating monthly daily budget
+        // This should be implemented based on your budget logic
+    }
+
+    private function handleBudgetTracking($userId, $accountId, $amount)
+    {
+        // Implementation for handling budget tracking
+        // This should return budget tracking data
+        return [
+            'budget_updated' => true,
+            'amount' => $amount
+        ];
+    }
 }

@@ -53,10 +53,11 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/detail-receipt-expense', [TransactionController::class, 'getDetailReceiptExpense']);
     Route::get('/detail-receipt-incomes', [TransactionController::class, 'getDetailReceiptIncomes']);
     
-    // Asset endpoints
+    // Asset/Account endpoints
     Route::get('/user-accounts', [AssetController::class, 'getUserAccounts']);
     Route::post('/add-new-account', [AssetController::class, 'addNewAccount']);
     Route::put('/update-account-balance', [AssetController::class, 'updateAccountBalance']);
+    Route::put('/update-account-allocation', [AssetController::class, 'updateAccountAllocation']);
     
     // Goal endpoints
     Route::get('/goal-graphic-rate', [GoalController::class, 'getGoalGraphicRate']);
