@@ -100,6 +100,7 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/user-data', [UserController::class, 'getUserData']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
-    // Other endpoints
+    // AI Advice & Reminder endpoints
     Route::get('/advice', [AdviceController::class, 'getAdvices']);
+    Route::post('/reminder', [AdviceController::class, 'getReminder']);
 });

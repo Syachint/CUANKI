@@ -446,7 +446,7 @@ class AchievementController extends Controller
     /**
      * Calculate current expense streak
      */
-    private function calculateCurrentStreak($user)
+    public function calculateCurrentStreak($user)
     {
         $expenses = Expense::where('user_id', $user->id)
             ->orderBy('expense_date', 'desc')

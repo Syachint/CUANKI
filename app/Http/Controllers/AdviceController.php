@@ -6,6 +6,8 @@ use Illuminate\Http\Request;
 use App\Models\User;
 use App\Models\UserFinancePlan;
 use App\Models\AccountAllocation;
+use App\Controllers\AchievementController;
+use App\Controllers\UserController;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log; // Tambahkan Log untuk debugging
@@ -124,6 +126,304 @@ class AdviceController extends Controller
             'cards' => $results
         ]);
     }
+
+    /**
+     * Get AI-powered contextual reminders for specific pages
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getReminder(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'page' => 'required|in:transaction,asset,goals',
+            'context' => 'nullable|array' // Additional context data per page
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Invalid page parameter',
+                'errors' => $validator->errors()
+            ], 400);
+        }
+
+        $user = $request->user();
+        $page = $request->input('page');
+        $context = $request->input('context', []);
+
+        try {
+            // Collect contextual data based on page
+            $contextualData = $this->collectContextualData($user, $page, $context);
+            
+            // Generate AI prompt based on page and data
+            $prompt = $this->buildReminderPrompt($page, $contextualData, $user);
+            
+            // Get AI response
+            $aiResponse = $this->fetchGeminiResponse($prompt, $user->username ?? $user->name);
+            
+            return response()->json([
+                'status' => 'success',
+                'message' => 'AI reminder generated successfully',
+                'data' => [
+                    'page' => $page,
+                    'reminder' => $aiResponse['text'],
+                    'context_analysis' => $contextualData['analysis'],
+                    'priority_level' => $contextualData['priority'],
+                    'action_suggestions' => $contextualData['suggestions']
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to generate reminder: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Collect contextual data based on page type
+     */
+    private function collectContextualData($user, $page, $context)
+    {
+        $data = [
+            'user_info' => [
+                'username' => $user->username ?? $user->name,
+                'age' => $user->age,
+                'status' => $user->status // mahasiswa/pelajar
+            ],
+            'analysis' => [],
+            'priority' => 'medium',
+            'suggestions' => []
+        ];
+
+        switch ($page) {
+            case 'transaction':
+                $data = array_merge($data, $this->analyzeTransactionContext($user, $context));
+                break;
+                
+            case 'asset':
+                $data = array_merge($data, $this->analyzeAssetContext($user, $context));
+                break;
+                
+            case 'goals':
+                $data = array_merge($data, $this->analyzeGoalsContext($user, $context));
+                break;
+        }
+
+        return $data;
+    }
+
+    /**
+     * Analyze transaction page context
+     */
+    private function analyzeTransactionContext($user, $context)
+    {
+        // Import required models
+        $todayExpenses = \App\Models\Expense::where('user_id', $user->id)
+                            ->whereDate('expense_date', today())
+                            ->sum('amount');
+        
+        $monthlyExpenses = \App\Models\Expense::where('user_id', $user->id)
+                            ->whereMonth('expense_date', now()->month)
+                            ->whereYear('expense_date', now()->year)
+                            ->sum('amount');
+
+        $lastExpense = \App\Models\Expense::where('user_id', $user->id)
+                            ->latest('expense_date')
+                            ->first();
+
+        // Calculate streak for transaction context
+        $streak = app(\App\Http\Controllers\AchievementController::class)->calculateCurrentStreak($user);
+
+        // Get user's finance plan
+        $financePlan = \App\Models\UserFinancePlan::where('user_id', $user->id)->first();
+        $dailyBudget = $financePlan ? ($financePlan->monthly_income - $financePlan->saving_target_amount) / 30 : 0;
+
+        $analysis = [
+            'today_spending' => $todayExpenses,
+            'monthly_spending' => $monthlyExpenses,
+            'daily_budget' => $dailyBudget,
+            'over_budget_today' => $todayExpenses > $dailyBudget,
+            'streak_days' => $streak,
+            'last_transaction' => $lastExpense ? $lastExpense->expense_date : null,
+            'spending_pattern' => $this->analyzeSpendingPattern($user)
+        ];
+
+        // Determine priority based on spending behavior
+        $priority = 'medium';
+        if ($todayExpenses > $dailyBudget * 1.5) {
+            $priority = 'high';
+        } elseif ($streak >= 7) {
+            $priority = 'low'; // Good habit
+        }
+
+        $suggestions = $this->generateTransactionSuggestions($analysis);
+
+        return [
+            'analysis' => $analysis,
+            'priority' => $priority,
+            'suggestions' => $suggestions
+        ];
+    }
+
+    /**
+     * Analyze asset page context
+     */
+    private function analyzeAssetContext($user, $context)
+    {
+        $accounts = \App\Models\Account::where('user_id', $user->id)->count();
+        $allocations = \App\Models\AccountAllocation::whereHas('account', function($q) use ($user) {
+            $q->where('user_id', $user->id);
+        })->get();
+
+        $totalBalance = $allocations->sum('balance_per_type');
+        $savingsBalance = $allocations->where('type', 'Tabungan')->sum('balance_per_type');
+        $emergencyBalance = $allocations->where('type', 'Darurat')->sum('balance_per_type');
+
+        $financePlan = \App\Models\UserFinancePlan::where('user_id', $user->id)->first();
+        $monthlyIncome = $financePlan ? $financePlan->monthly_income : 0;
+
+        $analysis = [
+            'account_count' => $accounts,
+            'total_balance' => $totalBalance,
+            'savings_balance' => $savingsBalance,
+            'emergency_balance' => $emergencyBalance,
+            'monthly_income' => $monthlyIncome,
+            'emergency_fund_months' => $monthlyIncome > 0 ? round($emergencyBalance / $monthlyIncome, 1) : 0,
+            'savings_rate' => $monthlyIncome > 0 ? round(($savingsBalance / $monthlyIncome) * 100, 1) : 0,
+            'account_diversity' => $this->analyzeAccountDiversity($user)
+        ];
+
+        $priority = 'medium';
+        if ($analysis['emergency_fund_months'] < 3) {
+            $priority = 'high';
+        } elseif ($analysis['savings_rate'] > 20) {
+            $priority = 'low'; // Good savings rate
+        }
+
+        $suggestions = $this->generateAssetSuggestions($analysis);
+
+        return [
+            'analysis' => $analysis,
+            'priority' => $priority,
+            'suggestions' => $suggestions
+        ];
+    }
+
+    /**
+     * Analyze goals page context
+     */
+    private function analyzeGoalsContext($user, $context)
+    {
+        $goals = \App\Models\Goal::where('user_id', $user->id)->get();
+        $activeGoals = $goals->where('is_goal_achieved', false);
+        $completedGoals = $goals->where('is_goal_achieved', true);
+
+        $financePlan = \App\Models\UserFinancePlan::where('user_id', $user->id)->first();
+        $monthlySavings = $financePlan ? $financePlan->saving_target_amount : 0;
+
+        $analysis = [
+            'total_goals' => $goals->count(),
+            'active_goals' => $activeGoals->count(),
+            'completed_goals' => $completedGoals->count(),
+            'monthly_savings_target' => $monthlySavings,
+            'goal_completion_rate' => $goals->count() > 0 ? round(($completedGoals->count() / $goals->count()) * 100, 1) : 0,
+            'nearest_deadline' => $this->findNearestGoalDeadline($activeGoals),
+            'goal_progress' => $this->analyzeGoalProgress($activeGoals)
+        ];
+
+        $priority = 'medium';
+        if ($analysis['active_goals'] == 0) {
+            $priority = 'high'; // No active goals
+        } elseif ($analysis['goal_completion_rate'] > 50) {
+            $priority = 'low'; // Good goal achievement
+        }
+
+        $suggestions = $this->generateGoalSuggestions($analysis);
+
+        return [
+            'analysis' => $analysis,
+            'priority' => $priority,
+            'suggestions' => $suggestions
+        ];
+    }
+
+    /**
+     * Build AI prompt based on page and contextual data
+     * 
+     * PLACEHOLDER - You'll implement the actual prompts here
+     */
+    private function buildReminderPrompt($page, $contextualData, $user)
+    {
+        $username = $user->username ?? $user->name ?? 'User';
+        $basePrompt = "Kamu adalah penasihat keuangan pribadi. Berikan analisis yang ringkas, objektif, dan menggunakan bahasa gaul Indonesia yang sopan dan ramah (aku-kamu). Jangan berikan judul atau poin-poin. Cukup berikan paragraf analisis. Sapa user dengan nama: " . $username;
+
+        switch ($page) {
+            case 'transaction':
+                $todaySpending = number_format($contextualData['analysis']['today_spending'], 0, ',', '.');
+                $dailyBudget = number_format($contextualData['analysis']['daily_budget'], 0, ',', '.');
+                $streak = $contextualData['analysis']['streak_days'];
+                $overBudget = $contextualData['analysis']['over_budget_today'];
+                $priority = $contextualData['priority'];
+                
+                return $basePrompt . "
+                Kamu adalah penasihat keuangan pribadi, dengan pengeluaran sehari segini Rp " . number_format($todaySpending, 0, ',', '.') . " dan anggaran harian Rp " . number_format($dailyBudget, 0, ',', '.') . "apakah sudah efektif?(jika " . ($overBudget ? "OVER BUDGET!" : "okee amannn") . " anggaran hari ini). Ini adalah streak dia " . $streak . " hari, jadi berikan semangat untuk selalu menyalakan streaknya. Response harus motivatif dan asik(max 150 kata) dalam bahasa Indonesia.
+                ";
+                
+            case 'asset':
+                $accountCount = $contextualData['analysis']['account_count'];
+                $emergencyMonths = $contextualData['analysis']['emergency_fund_months'];
+                $savingsRate = $contextualData['analysis']['savings_rate'];
+                $totalBalance = number_format($contextualData['analysis']['total_balance'], 0, ',', '.');
+                $priority = $contextualData['priority'];
+                
+                return $basePrompt . "
+                Hai {$username}! Kamu lagi cek asset nih. 
+                
+                Kondisi keuangan kamu:
+                - Jumlah akun: {$accountCount} akun
+                - Dana darurat: {$emergencyMonths} bulan dari penghasilan
+                - Tingkat tabungan: {$savingsRate}% dari income
+                - Total saldo: Rp {$totalBalance}
+                - Level prioritas: {$priority}
+                
+                Berikan reminder tentang kesehatan finansial berdasarkan data di atas:
+                
+                Jika dana darurat < 3 bulan: sarankan prioritas emergency fund
+                Jika cuma 1 akun: motivasi diversifikasi account
+                Jika savings rate > 20%: kasih pujian good job
+                Jika savings rate < 10%: motivasi untuk tingkatkan tabungan
+                
+                Berikan reminder dalam 1-2 paragraf yang actionable dan supportive.
+                ";
+                
+            case 'goals':
+                $activeGoals = $contextualData['analysis']['active_goals'];
+                $completionRate = $contextualData['analysis']['goal_completion_rate'];
+                $monthlySavings = number_format($contextualData['analysis']['monthly_savings_target'], 0, ',', '.');
+                $totalGoals = $contextualData['analysis']['total_goals'];
+                $completedGoals = $contextualData['analysis']['completed_goals'];
+                $priority = $contextualData['priority'];
+                
+                return $basePrompt . "
+                Kamu adalah penasihat keuangan pribadi, dengan " . $activeGoals . " goal aktif dari total " . $totalGoals . " goals. Tingkat completion rate kamu " . $completionRate . "% (udah selesai " . $completedGoals . " goals). Target nabung bulanan untuk goals: Rp " . $monthlySavings . ". Prioritas: " . $priority . ". Berikan motivasi tentang pencapaian goals, evaluasi progress, dan strategi untuk boost goal achievement. Response harus inspiring dan actionable (max 150 kata) dalam bahasa Indonesia.
+                ";
+                
+            default:
+                return $basePrompt . "Berikan motivasi umum untuk mengelola keuangan dengan baik.";
+        }
+    }
+
+    // Helper methods (implement these based on your needs)
+    private function analyzeSpendingPattern($user) { return 'normal'; }
+    private function generateTransactionSuggestions($analysis) { return []; }
+    private function analyzeAccountDiversity($user) { return 'balanced'; }
+    private function generateAssetSuggestions($analysis) { return []; }
+    private function findNearestGoalDeadline($goals) { return null; }
+    private function analyzeGoalProgress($goals) { return []; }
+    private function generateGoalSuggestions($analysis) { return []; }
 
     /**
      * Membuat prompt untuk Kartu 1: Daily Budget
