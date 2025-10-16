@@ -91,6 +91,17 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
+        // Cek apakah email ada di database
+        $user = User::where('email', $request->email)->first();
+        
+        if (!$user) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Email tidak terdaftar, silahkan register terlebih dahulu',
+                'code' => 'EMAIL_NOT_FOUND'
+            ], 404);
+        }
+
         if (auth::attempt(['email' => $request->email, 'password' => $request->password])) {
             $user = Auth::user();
 
@@ -135,7 +146,8 @@ class AuthController extends Controller
         } else {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Email atau password salah'
+                'message' => 'Password salah',
+                'code' => 'INVALID_PASSWORD'
             ], 401);
         }
     }
