@@ -37,6 +37,7 @@ class AssetController extends Controller
                         'value' => $bankName . ' - ' . $allocation->type,
                         'label' => $bankName . ' - ' . $allocation->type,
                         'account_id' => $account->id,
+                        'account_allocation_id' => $allocation->id,
                         'account_name' => $bankName,
                         'type' => $allocation->type,
                         'balance' => $allocation->balance_per_type,
