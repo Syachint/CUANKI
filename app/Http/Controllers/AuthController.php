@@ -72,17 +72,17 @@ class AuthController extends Controller
         ], 201);
 
         // Set refresh token sebagai httpOnly cookie
-        $response->cookie(
+        $response->withCookie(cookie(
             'refresh_token', 
             $refresh_token, 
             $refreshTokenExpiresAt->diffInMinutes(now()), // minutes
             '/', // path
-            null, // domain
+            null, // domain (null untuk localhost)
             false, // secure (false untuk development HTTP)
             true, // httpOnly
             false, // raw
             'Lax' // sameSite (Lax untuk development)
-        );
+        ));
 
         // Debug: Log cookie setting
         \Log::info('Setting refresh token cookie in register', [
@@ -129,17 +129,15 @@ class AuthController extends Controller
                 ]
             ], 200);
 
-            // Set refresh token sebagai httpOnly cookie
-            $response->cookie(
+            // Set refresh token sebagai cookie (simple method)
+            setcookie(
                 'refresh_token', 
                 $refresh_token, 
-                $refreshTokenExpiresAt->diffInMinutes(now()), // minutes
-                '/', // path
-                null, // domain
-                false, // secure (false untuk development HTTP)
-                true, // httpOnly
-                false, // raw
-                'Lax' // sameSite (Lax untuk development)
+                $refreshTokenExpiresAt->getTimestamp(),
+                '/',
+                '',
+                false, // secure
+                true   // httponly
             );
 
             return $response;
@@ -196,17 +194,17 @@ class AuthController extends Controller
         ]);
 
         // Set refresh token baru ke cookies
-        $response->cookie(
+        $response->withCookie(cookie(
             'refresh_token', 
             $newRefreshToken, 
             $refreshTokenExpiresAt->diffInMinutes(now()), // minutes
             '/', // path
-            null, // domain
+            null, // domain (null untuk localhost)
             false, // secure (false untuk development HTTP)
             true, // httpOnly
             false, // raw
             'Lax' // sameSite (Lax untuk development)
-        );
+        ));
 
         return $response;
     }
@@ -223,17 +221,7 @@ class AuthController extends Controller
         ], 200);
 
         // Hapus refresh token cookie dengan mengset expired
-        $response->cookie(
-            'refresh_token', 
-            '', 
-            -1, // expired
-            '/', // path
-            null, // domain
-            false, // secure (false untuk development HTTP)
-            true, // httpOnly
-            false, // raw
-            'Lax' // sameSite (Lax untuk development)
-        );
+        $response->withCookie(cookie()->forget('refresh_token'));
 
         return $response;
     }
