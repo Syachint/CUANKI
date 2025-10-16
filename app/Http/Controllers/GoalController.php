@@ -14,6 +14,24 @@ use Carbon\Carbon;
 class GoalController extends Controller
 {
     /**
+     * Helper function to check and award badges
+     */
+    private function checkBadges($user)
+    {
+        try {
+            $achievementController = new \App\Http\Controllers\AchievementController();
+            $request = new \Illuminate\Http\Request();
+            $request->setUserResolver(function() use ($user) {
+                return $user;
+            });
+            $achievementController->checkAndAwardBadges($request);
+        } catch (\Exception $e) {
+            // Badge checking should not affect main operation
+            \Log::warning('Badge checking failed: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Helper method to get current time in Asia/Jakarta timezone
      */
     private function now()
@@ -904,6 +922,64 @@ class GoalController extends Controller
                 'debug' => [
                     'user_id' => $user->id ?? 'unknown'
                 ]
+            ], 500);
+        }
+    }
+
+    /**
+     * Mark goal as completed
+     */
+    public function markGoalCompleted(Request $request, $id)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not authenticated'
+                ], 401);
+            }
+
+            // Find the goal and verify ownership
+            $goal = Goal::where('id', $id)
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (!$goal) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Goal not found or access denied'
+                ], 404);
+            }
+
+            // Mark goal as completed
+            $goal->update([
+                'is_goal_achieved' => true
+            ]);
+
+            // Check and award badges after goal completion
+            $this->checkBadges($user);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Goal marked as completed successfully',
+                'data' => [
+                    'goal_id' => $goal->id,
+                    'goal_name' => $goal->goal_name,
+                    'is_goal_achieved' => $goal->is_goal_achieved,
+                    'updated_at' => $goal->updated_at->format('Y-m-d H:i:s'),
+                    'formatted' => [
+                        'updated_at' => $goal->updated_at->format('d M Y H:i'),
+                        'target_amount' => 'Rp ' . number_format($goal->target_amount, 0, ',', '.')
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error marking goal as completed: ' . $e->getMessage()
             ], 500);
         }
     }

@@ -16,6 +16,23 @@ use Carbon\Carbon;
 class DashboardController extends Controller
 {
     /**
+     * Helper function to check and award badges
+     */
+    private function checkBadges($user)
+    {
+        try {
+            $achievementController = new \App\Http\Controllers\AchievementController();
+            $request = new \Illuminate\Http\Request();
+            $request->setUserResolver(function() use ($user) {
+                return $user;
+            });
+            $achievementController->checkAndAwardBadges($request);
+        } catch (\Exception $e) {
+            // Badge checking should not affect main operation
+            \Log::warning('Badge checking failed: ' . $e->getMessage());
+        }
+    }
+    /**
      * Get current datetime with proper timezone
      */
     private function now()

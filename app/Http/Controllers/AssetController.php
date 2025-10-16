@@ -11,6 +11,24 @@ use Illuminate\Support\Facades\DB;
 
 class AssetController extends Controller
 {
+    /**
+     * Helper function to check and award badges
+     */
+    private function checkBadges($user)
+    {
+        try {
+            $achievementController = new \App\Http\Controllers\AchievementController();
+            $request = new \Illuminate\Http\Request();
+            $request->setUserResolver(function() use ($user) {
+                return $user;
+            });
+            $achievementController->checkAndAwardBadges($request);
+        } catch (\Exception $e) {
+            // Badge checking should not affect main operation
+            \Log::warning('Badge checking failed: ' . $e->getMessage());
+        }
+    }
+
     public function getUserAccounts(Request $request)
     {
         try {
@@ -269,6 +287,9 @@ class AssetController extends Controller
                     'budget_tracking' => $budgetData
                 ]
             ], 201);
+
+            // Check and award badges after successful account creation
+            $this->checkBadges($user);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([

@@ -10,9 +10,29 @@ use App\Models\Budget;
 use App\Models\Expense;
 use App\Models\ExpenseCategories;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Http;
 
 class TransactionController extends Controller
 {
+    /**
+     * Helper function to check and award badges
+     */
+    private function checkBadges($user)
+    {
+        try {
+            $achievementController = new \App\Http\Controllers\AchievementController();
+            $request = new \Illuminate\Http\Request();
+            $request->setUserResolver(function() use ($user) {
+                return $user;
+            });
+            $achievementController->checkAndAwardBadges($request);
+        } catch (\Exception $e) {
+            // Badge checking should not affect main operation
+            // Log error but don't return error to user
+            \Log::warning('Badge checking failed: ' . $e->getMessage());
+        }
+    }
+
     /**
      * Get current datetime with proper timezone
      */
@@ -129,6 +149,9 @@ class TransactionController extends Controller
                     ]
                 ]
             ], 201);
+
+            // Check and award badges after successful income creation
+            $this->checkBadges($user);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -277,6 +300,9 @@ class TransactionController extends Controller
                     ]
                 ]
             ], 201);
+
+            // Check and award badges after successful expense creation
+            $this->checkBadges($user);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([

@@ -12,6 +12,7 @@ use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\AssetController;
 use App\Http\Controllers\GoalController;
 use App\Http\Controllers\MonthlyExpenseController;
+use App\Http\Controllers\AchievementController;
 
 // Auth endpoints
 Route::post('/register', [AuthController::class, 'registerUser']);
@@ -72,6 +73,7 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/goals/{id}', [GoalController::class, 'getGoal']);
     Route::put('/goals/{id}', [GoalController::class, 'updateGoal']);
     Route::delete('/goals/{id}', [GoalController::class, 'deleteGoal']);
+    Route::put('/goals/{id}/complete', [GoalController::class, 'markGoalCompleted']);
     
     // Monthly Expenses CRUD
     Route::get('/monthly-expenses', [MonthlyExpenseController::class, 'index']);
@@ -80,6 +82,10 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::delete('/monthly-expenses/{id}', [MonthlyExpenseController::class, 'destroy']);
     Route::post('/monthly-expenses/{id}/add-expense', [MonthlyExpenseController::class, 'addExpenseAmount']);
     Route::get('/monthly-expenses/categories', [MonthlyExpenseController::class, 'getCategories']);
+    
+    // Achievement/Badge endpoints
+    Route::get('/badges', [AchievementController::class, 'getUserBadges']);
+    Route::post('/badges/check', [AchievementController::class, 'triggerBadgeCheck']);
     
     // User Profile CRUD endpoints
     Route::get('/profile', [UserController::class, 'getUserProfile']);
