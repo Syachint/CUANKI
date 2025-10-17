@@ -1,0 +1,708 @@
+{
+	"info": {
+		"_postman_id": "cuanki-api-collection",
+		"name": "CUANKI API Collection",
+		"description": "Complete API collection for CUANKI financial management application",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "cuanki-team"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Register User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\",\n    \"password\": \"password123\",\n    \"password_confirmation\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/register",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"register"
+							]
+						}
+					}
+				},
+				{
+					"name": "Login User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.data && response.data.access_token) {",
+									"        pm.environment.set('auth_token', response.data.access_token);",
+									"        console.log('Token saved:', response.data.access_token);",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"john@example.com\",\n    \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"login"
+							]
+						}
+					}
+				},
+				{
+					"name": "Refresh Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"refresh_token\": \"your_refresh_token_here\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/refresh",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"refresh"
+							]
+						}
+					}
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/logout",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"logout"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "User Management",
+			"item": [
+				{
+					"name": "Get User Data",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/user-data",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"user-data"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Form Setup",
+			"item": [
+				{
+					"name": "Get Banks List",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/listbank",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"listbank"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Origins",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/origins",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"origins"
+							]
+						}
+					}
+				},
+				{
+					"name": "Form Detail User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"John Doe\",\n    \"username\": \"johndoe\",\n    \"phone\": \"08123456789\",\n    \"birth_date\": \"1990-01-01\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/form/user",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"form",
+								"user"
+							]
+						}
+					}
+				},
+				{
+					"name": "Form Detail Account",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"accounts\": [\n        {\n            \"bank_id\": 1,\n            \"account_name\": \"Main Account\",\n            \"account_number\": \"1234567890\",\n            \"current_balance\": 5000000,\n            \"allocations\": [\n                {\n                    \"type\": \"Kebutuhan\",\n                    \"balance_per_type\": 3000000\n                },\n                {\n                    \"type\": \"Tabungan\",\n                    \"balance_per_type\": 1500000\n                },\n                {\n                    \"type\": \"Darurat\",\n                    \"balance_per_type\": 500000\n                }\n            ]\n        }\n    ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/form/account",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"form",
+								"account"
+							]
+						}
+					}
+				},
+				{
+					"name": "Form Detail Plan",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"monthly_income\": 8000000,\n    \"income_date\": 25,\n    \"saving_target_amount\": 2000000,\n    \"saving_target_duration\": 2,\n    \"emergency_target_amount\": 10000000\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/form/plan",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"form",
+								"plan"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Dashboard",
+			"item": [
+				{
+					"name": "Get Greeting User",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/greeting-user",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"greeting-user"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Goals Progress",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/goals-progress",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"goals-progress"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Today Expenses",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/today-expenses",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"today-expenses"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Daily Saving",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/daily-saving",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"daily-saving"
+							]
+						}
+					}
+				},
+				{
+					"name": "Update Account Balance",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"account_id\": 1,\n    \"type\": \"Kebutuhan\",\n    \"balance_per_type\": 3500000\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/update-account-balance",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"update-account-balance"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Transactions",
+			"item": [
+				{
+					"name": "Get Expense Categories",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/expense-categories",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"expense-categories"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get User Accounts",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/user-accounts",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"user-accounts"
+							]
+						}
+					}
+				},
+				{
+					"name": "Add Income",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"account_id\": 1,\n    \"amount\": 5000000,\n    \"description\": \"Monthly Salary\",\n    \"income_date\": \"2025-10-14\",\n    \"origin_id\": 1\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/add-income",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"add-income"
+							]
+						}
+					}
+				},
+				{
+					"name": "Add Expense",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"account_id\": 1,\n    \"expense_category_id\": 1,\n    \"amount\": 50000,\n    \"description\": \"Lunch at restaurant\",\n    \"expense_date\": \"2025-10-14\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/add-expense",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"add-expense"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Google Authentication",
+			"item": [
+				{
+					"name": "Google Login",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/auth/google",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"google"
+							]
+						}
+					}
+				},
+				{
+					"name": "Google Callback",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/auth/google/callback",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"google",
+								"callback"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Advice",
+			"item": [
+				{
+					"name": "Get Advices",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{auth_token}}"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/advice",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"advice"
+							]
+						}
+					}
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000",
+			"type": "string"
+		}
+	]
+}
