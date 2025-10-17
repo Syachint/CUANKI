@@ -90,18 +90,25 @@ class GoogleController extends Controller
         $refreshTokenExpiresAt = $this->now()->addDays(7);
         $refresh_token = $user->createToken('refresh_token', ['refresh'], $refreshTokenExpiresAt)->plainTextToken;
 
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Google authentication successful',
-            'data' => [
-                'user' => $user,
-                'access_token' => $access_token,
-                'refresh_token' => $refresh_token,
-                'token_type' => 'Bearer',
-                'access_token_expires_at' => $accessTokenExpiresAt->toDateTimeString(),
-                'refresh_token_expires_at' => $refreshTokenExpiresAt->toDateTimeString()
-            ]
-        ], 200);
+        // 🔧 Jika request dari API (misal mobile app)
+        if (request()->wantsJson()) {
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Google authentication successful',
+                'data' => [
+                    'user' => $user,
+                    'access_token' => $access_token,
+                    'refresh_token' => $refresh_token,
+                    'token_type' => 'Bearer',
+                    'access_token_expires_at' => $accessTokenExpiresAt->toDateTimeString(),
+                    'refresh_token_expires_at' => $refreshTokenExpiresAt->toDateTimeString()
+                ]
+            ], 200);
+        }
+
+        // 🌐 Jika request dari browser (redirect via Google)
+        $frontendUrl = config('app.frontend_url', 'http://localhost:3000');
+        return redirect()->away($frontendUrl . '/auth/google/callback?access_token=' . $access_token . '&refresh_token=' . $refresh_token);
     }
     /**
      * Redirect user to Google OAuth
