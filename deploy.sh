@@ -193,7 +193,7 @@ fi
 
 if [ "$SKIP_SSL" != "true" ]; then
     # Get domain from nginx config
-    DOMAIN_NAME=$(grep "server_name" nginx/default.conf | head -1 | awk '{print $2}' | sed 's/;//')
+    DOMAIN_NAME=$(grep -A1 "listen 443" nginx/default.conf | grep "server_name" | awk '{print $2}' | sed 's/;//')
     
     if [ -z "$DOMAIN_NAME" ] || [ "$DOMAIN_NAME" == "localhost" ] || [[ $DOMAIN_NAME == *"_"* ]]; then
         echo "⚠️  No domain configured in nginx/default.conf"
