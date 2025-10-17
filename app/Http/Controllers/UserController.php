@@ -41,12 +41,13 @@ class UserController extends Controller
                 'data' => [
                     'user' => [
                         'id' => $user->id,
-                        'full_name' => $user->full_name,
+                        'full_name' => $user->name,
+                        'username' => $user->username,
                         'email' => $user->email,
                         'age' => $user->age,
                         'status' => $user->status,
                         'origin_id' => $user->origin_id,
-                        'origin_name' => $user->origin ? $user->origin->name : null,
+                        'origin_name' => $user->origin ? $user->origin->city_province : null,
                         'profile_picture' => $user->profile_picture,
                         'email_verified_at' => $user->email_verified_at,
                         'created_at' => $user->created_at->format('Y-m-d H:i:s'),
@@ -80,7 +81,8 @@ class UserController extends Controller
 
             // Validation rules
             $validator = Validator::make($request->all(), [
-                'full_name' => 'sometimes|string|max:255',
+                'full_name' => 'sometimes|string|max:255|unique:users,full_name,' . $user->id,
+                'username' => 'sometimes|string|max:50|unique:users,username,' . $user->id,
                 'email' => 'sometimes|email|unique:users,email,' . $user->id,
                 'age' => 'sometimes|integer|min:1|max:150',
                 'status' => 'sometimes|string|in:Pelajar,Mahasiswa,Pekerja,Pengangguran,Lainnya',
