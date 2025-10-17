@@ -194,22 +194,22 @@ fi
 if [ "$SKIP_SSL" != "true" ]; then
     # Get domain from nginx config
     DOMAIN_NAME=$(grep -A1 "listen 443" nginx/default.conf | grep "server_name" | awk '{print $2}' | sed 's/;//')
-    
+
     if [ -z "$DOMAIN_NAME" ] || [ "$DOMAIN_NAME" == "localhost" ] || [[ $DOMAIN_NAME == *"_"* ]]; then
         echo "⚠️  No domain configured in nginx/default.conf"
         read -p "Enter your domain for SSL (e.g., syachdev.site) or leave empty to skip: " DOMAIN_INPUT
         DOMAIN_NAME="$DOMAIN_INPUT"
     fi
-    
+
     if [ ! -z "$DOMAIN_NAME" ]; then
         echo "📋 Domain detected: $DOMAIN_NAME"
         echo "🌐 Server IP: $(curl -s ifconfig.me 2>/dev/null || echo 'Unable to detect')"
         echo ""
         echo "⚠️  IMPORTANT: Make sure DNS A record is pointing to this server!"
         echo ""
-        
+
         read -p "Do you want to setup SSL certificate for $DOMAIN_NAME? (y/N): " setup_ssl
-        
+
         if [[ $setup_ssl =~ ^[Yy]$ ]]; then
             # Check if certbot is installed
             if ! command -v certbot &> /dev/null; then
@@ -224,14 +224,14 @@ if [ "$SKIP_SSL" != "true" ]; then
                     read -p "Press Enter after installing certbot, or Ctrl+C to skip..."
                 fi
             fi
-            
+
             if command -v certbot &> /dev/null; then
                 echo ""
                 echo "🔐 Generating SSL certificate..."
                 echo "⚠️  This requires port 80 to be free and DNS to be configured"
                 echo ""
                 read -p "Press Enter to continue or Ctrl+C to cancel..."
-                
+
                 # Stop nginx container to free port 80
                 echo "🛑 Stopping nginx container temporarily..."
                 if check_docker_permissions; then
@@ -239,17 +239,17 @@ if [ "$SKIP_SSL" != "true" ]; then
                 else
                     sudo docker stop cuanki-nginx 2>/dev/null || true
                 fi
-                
+
                 # Generate certificate
                 CERT_EMAIL=""
                 read -p "Enter email for SSL certificate (or leave empty): " CERT_EMAIL
-                
+
                 if [ -z "$CERT_EMAIL" ]; then
                     CERT_CMD="certbot certonly --standalone -d $DOMAIN_NAME -d www.$DOMAIN_NAME --non-interactive --agree-tos --register-unsafely-without-email"
                 else
                     CERT_CMD="certbot certonly --standalone -d $DOMAIN_NAME -d www.$DOMAIN_NAME --non-interactive --agree-tos --email $CERT_EMAIL"
                 fi
-                
+
                 if check_root; then
                     eval $CERT_CMD || {
                         echo "⚠️  Certificate generation failed. Please check:"
@@ -265,22 +265,22 @@ if [ "$SKIP_SSL" != "true" ]; then
                         echo "   3. No firewall blocking port 80"
                     }
                 fi
-                
+
                 # Copy certificates if successful
                 if [ -d "/etc/letsencrypt/live/$DOMAIN_NAME" ]; then
                     echo "📋 Copying SSL certificates..."
-                    mkdir -p ssl  # pastikan folder ssl ada
+                    mkdir -p ssl
 
                     if check_root; then
-                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/ 2>/dev/null || true
-                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/ 2>/dev/null || true
-                        chown $USER:$USER ssl/*.pem 2>/dev/null || true
-                        chmod 644 ssl/*.pem 2>/dev/null || true
+                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/ || true
+                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/ || true
+                        chown $USER:$USER ssl/*.pem || true
+                        chmod 644 ssl/*.pem || true
                     else
-                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/ 2>/dev/null || true
-                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/ 2>/dev/null || true
-                        sudo chown $USER:$USER ssl/*.pem 2>/dev/null || true
-                        sudo chmod 644 ssl/*.pem 2>/dev/null || true
+                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/ || true
+                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/ || true
+                        sudo chown $USER:$USER ssl/*.pem || true
+                        sudo chmod 644 ssl/*.pem || true
                     fi
 
                     if [ -f "ssl/fullchain.pem" ] && [ -f "ssl/privkey.pem" ]; then
@@ -295,7 +295,7 @@ if [ "$SKIP_SSL" != "true" ]; then
                     read -p "Do you want to setup automatic SSL renewal? (y/N): " setup_renewal
                     if [[ $setup_renewal =~ ^[Yy]$ ]]; then
                         CURRENT_DIR=$(pwd)
-                        cat > /tmp/renew-ssl.sh << EOF
+                        cat > /tmp/renew-ssl.sh <<'EOF'
 #!/bin/bash
 docker stop cuanki-nginx 2>/dev/null || true
 certbot renew --quiet
@@ -322,7 +322,6 @@ EOF
                 else
                     echo "❌ SSL certificate generation failed or certificates not found"
                 fi
-
             else
                 echo "❌ Certbot not available. Skipping SSL setup."
             fi
