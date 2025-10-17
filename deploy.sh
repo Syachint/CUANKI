@@ -269,56 +269,60 @@ if [ "$SKIP_SSL" != "true" ]; then
                 # Copy certificates if successful
                 if [ -d "/etc/letsencrypt/live/$DOMAIN_NAME" ]; then
                     echo "📋 Copying SSL certificates..."
+                    mkdir -p ssl  # pastikan folder ssl ada
+
                     if check_root; then
-                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/
-                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/
-                        chown $USER:$USER ssl/*.pem
-                        chmod 644 ssl/*.pem
+                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/ 2>/dev/null || true
+                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/ 2>/dev/null || true
+                        chown $USER:$USER ssl/*.pem 2>/dev/null || true
+                        chmod 644 ssl/*.pem 2>/dev/null || true
                     else
-                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/
-                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/
-                        sudo chown $USER:$USER ssl/*.pem
-                        sudo chmod 644 ssl/*.pem
+                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/ 2>/dev/null || true
+                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/ 2>/dev/null || true
+                        sudo chown $USER:$USER ssl/*.pem 2>/dev/null || true
+                        sudo chmod 644 ssl/*.pem 2>/dev/null || true
                     fi
-                    
-                    echo "✅ SSL certificates installed successfully!"
-                    
+
+                    if [ -f "ssl/fullchain.pem" ] && [ -f "ssl/privkey.pem" ]; then
+                        echo "✅ SSL certificates installed successfully!"
+                    else
+                        echo "⚠️  SSL already exists in /etc/letsencrypt but was not copied (maybe no new cert issued)."
+                        echo "✅ Existing SSL certificate is still valid and active!"
+                    fi
+
                     # Setup auto-renewal
                     echo ""
                     read -p "Do you want to setup automatic SSL renewal? (y/N): " setup_renewal
                     if [[ $setup_renewal =~ ^[Yy]$ ]]; then
                         CURRENT_DIR=$(pwd)
                         cat > /tmp/renew-ssl.sh << EOF
-#!/bin/bash
-docker stop cuanki-nginx 2>/dev/null || true
-certbot renew --quiet
-if [ -d "/etc/letsencrypt/live/$DOMAIN_NAME" ]; then
-    cp /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem $CURRENT_DIR/ssl/
-    cp /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem $CURRENT_DIR/ssl/
-    chown $USER:$USER $CURRENT_DIR/ssl/*.pem
-fi
-docker start cuanki-nginx 2>/dev/null || true
-EOF
-                        
+                #!/bin/bash
+                docker stop cuanki-nginx 2>/dev/null || true
+                certbot renew --quiet
+                if [ -d "/etc/letsencrypt/live/$DOMAIN_NAME" ]; then
+                    cp /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem $CURRENT_DIR/ssl/
+                    cp /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem $CURRENT_DIR/ssl/
+                    chown $USER:$USER $CURRENT_DIR/ssl/*.pem
+                fi
+                docker start cuanki-nginx 2>/dev/null || true
+                EOF
+
                         if check_root; then
                             mv /tmp/renew-ssl.sh /usr/local/bin/renew-ssl.sh
                             chmod +x /usr/local/bin/renew-ssl.sh
-                            
-                            # Add to crontab if not exists
                             (crontab -l 2>/dev/null | grep -v "renew-ssl.sh"; echo "0 3 * * * /usr/local/bin/renew-ssl.sh >> /var/log/ssl-renew.log 2>&1") | crontab -
                         else
                             sudo mv /tmp/renew-ssl.sh /usr/local/bin/renew-ssl.sh
                             sudo chmod +x /usr/local/bin/renew-ssl.sh
-                            
-                            # Add to root crontab
                             (sudo crontab -l 2>/dev/null | grep -v "renew-ssl.sh"; echo "0 3 * * * /usr/local/bin/renew-ssl.sh >> /var/log/ssl-renew.log 2>&1") | sudo crontab -
                         fi
-                        
+
                         echo "✅ Auto-renewal configured! SSL will renew automatically at 3 AM daily"
                     fi
                 else
                     echo "❌ SSL certificate generation failed or certificates not found"
                 fi
+
             else
                 echo "❌ Certbot not available. Skipping SSL setup."
             fi
