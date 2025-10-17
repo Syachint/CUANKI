@@ -350,6 +350,8 @@ class DashboardController extends Controller
             // Handle budget tracking for "Kebutuhan" type
             $budgetData = null;
             if ($type === 'Kebutuhan') {
+                // Reset monthly initial budget when there's manual change
+                $this->resetMonthlyInitialBudget($user->id);
                 $budgetData = $this->handleBudgetTracking($user->id, $accountId, $newBalancePerType);
             }
 
@@ -655,6 +657,29 @@ class DashboardController extends Controller
                 'daily_budget' => 0,
                 'daily_saving' => 0
             ];
+        }
+    }
+
+    /**
+     * Reset monthly initial budget when there's manual change
+     */
+    private function resetMonthlyInitialBudget($userId)
+    {
+        try {
+            $currentYear = Carbon::now()->year;
+            $currentMonth = Carbon::now()->month;
+            
+            // Delete existing initial budget records for this month to force recalculation
+            Budget::where('user_id', $userId)
+                ->whereYear('created_at', $currentYear)
+                ->whereMonth('created_at', $currentMonth)
+                ->whereNotNull('initial_daily_budget')
+                ->update(['initial_daily_budget' => null]);
+
+            \Log::info("Reset monthly initial budget for user {$userId}, {$currentYear}-{$currentMonth}");
+            
+        } catch (\Exception $e) {
+            \Log::error('Failed to reset monthly initial budget: ' . $e->getMessage());
         }
     }
 
