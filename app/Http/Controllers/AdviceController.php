@@ -358,7 +358,7 @@ class AdviceController extends Controller
     private function buildReminderPrompt($page, $contextualData, $user)
     {
         $username = $user->username ?? $user->name ?? 'User';
-        $basePrompt = "Kamu adalah penasihat keuangan pribadi. Berikan analisis yang ringkas, objektif, dan menggunakan bahasa gaul Indonesia yang sopan dan ramah (aku-kamu). Jangan berikan judul atau poin-poin. Cukup berikan paragraf analisis. Sapa user dengan nama: " . $username;
+        $basePrompt = "Kamu adalah penasihat keuangan pribadi. Berikan analisis yang ringkas, objektif, dan menggunakan bahasa gaul Indonesia yang sopan dan ramah (aku-kamu). Jangan berikan judul atau poin-poin, jangan memakai text style Bold atau yang lain, cukup text biasa saja. Cukup berikan paragraf analisis. Sapa user dengan nama: " . $username;
 
         switch ($page) {
             case 'transaction':
