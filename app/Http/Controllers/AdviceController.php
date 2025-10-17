@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\Log; // Tambahkan Log untuk debugging
 class AdviceController extends Controller
 {
     // Menggunakan model yang lebih stabil sesuai kode lu
-    private $apiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent"; 
+    private $apiUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"; 
     private $maxRetries = 3;
     private $backoffBase = 1000; // 1000ms (1 detik)
 
