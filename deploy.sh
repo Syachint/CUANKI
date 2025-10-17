@@ -296,16 +296,16 @@ if [ "$SKIP_SSL" != "true" ]; then
                     if [[ $setup_renewal =~ ^[Yy]$ ]]; then
                         CURRENT_DIR=$(pwd)
                         cat > /tmp/renew-ssl.sh << EOF
-                #!/bin/bash
-                docker stop cuanki-nginx 2>/dev/null || true
-                certbot renew --quiet
-                if [ -d "/etc/letsencrypt/live/$DOMAIN_NAME" ]; then
-                    cp /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem $CURRENT_DIR/ssl/
-                    cp /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem $CURRENT_DIR/ssl/
-                    chown $USER:$USER $CURRENT_DIR/ssl/*.pem
-                fi
-                docker start cuanki-nginx 2>/dev/null || true
-                EOF
+#!/bin/bash
+docker stop cuanki-nginx 2>/dev/null || true
+certbot renew --quiet
+if [ -d "/etc/letsencrypt/live/$DOMAIN_NAME" ]; then
+    cp /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem $CURRENT_DIR/ssl/
+    cp /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem $CURRENT_DIR/ssl/
+    chown $USER:$USER $CURRENT_DIR/ssl/*.pem
+fi
+docker start cuanki-nginx 2>/dev/null || true
+EOF
 
                         if check_root; then
                             mv /tmp/renew-ssl.sh /usr/local/bin/renew-ssl.sh
