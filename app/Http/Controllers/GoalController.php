@@ -413,10 +413,40 @@ class GoalController extends Controller
                 ->where('id', $validated['account_allocation_id'])
                 ->first();
 
-            if (!$accountAllocation || $accountAllocation->account->user_id !== $userId) {
+            if (!$accountAllocation) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Account allocation not found or access denied'
+                    'message' => 'Account allocation not found',
+                    'debug' => [
+                        'allocation_id' => $validated['account_allocation_id'],
+                        'available_allocations' => AccountAllocation::pluck('id')->toArray(),
+                        'user_id' => $userId
+                    ]
+                ], 404);
+            }
+
+            if (!$accountAllocation->account) {
+                return response()->json([
+                    'status' => 'error', 
+                    'message' => 'Account relationship broken for this allocation',
+                    'debug' => [
+                        'allocation_id' => $accountAllocation->id,
+                        'account_id' => $accountAllocation->account_id,
+                        'allocation_type' => $accountAllocation->type
+                    ]
+                ], 500);
+            }
+
+            if ($accountAllocation->account->user_id !== $userId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Access denied - account belongs to different user',
+                    'debug' => [
+                        'allocation_id' => $accountAllocation->id,
+                        'account_user_id' => $accountAllocation->account->user_id,
+                        'requested_user_id' => $userId,
+                        'allocation_type' => $accountAllocation->type
+                    ]
                 ], 403);
             }
 
@@ -883,8 +913,14 @@ class GoalController extends Controller
             if ($accountIds->isEmpty()) {
                 return response()->json([
                     'status' => 'success',
-                    'message' => 'No accounts found',
-                    'data' => ['allocations' => []]
+                    'message' => 'No accounts found for this user',
+                    'data' => [
+                        'allocations' => [],
+                        'debug' => [
+                            'user_id' => $userId,
+                            'total_accounts' => 0
+                        ]
+                    ]
                 ], 200);
             }
 
@@ -892,6 +928,11 @@ class GoalController extends Controller
             $allocations = AccountAllocation::with(['account.bank'])
                 ->whereIn('account_id', $accountIds)
                 ->where('type', 'Tabungan')
+                ->get();
+
+            // Also get all allocations for debugging
+            $allAllocations = AccountAllocation::with(['account'])
+                ->whereIn('account_id', $accountIds)
                 ->get();
 
             $formattedAllocations = $allocations->map(function ($allocation) {
@@ -911,7 +952,21 @@ class GoalController extends Controller
                 'status' => 'success',
                 'message' => 'Available allocations retrieved successfully',
                 'data' => [
-                    'allocations' => $formattedAllocations
+                    'allocations' => $formattedAllocations,
+                    'debug' => [
+                        'user_id' => $userId,
+                        'total_accounts' => $accountIds->count(),
+                        'account_ids' => $accountIds->toArray(),
+                        'total_allocations' => $allAllocations->count(),
+                        'tabungan_allocations' => $allocations->count(),
+                        'all_allocation_types' => $allAllocations->pluck('type')->unique()->values(),
+                        'allocation_summary' => $allAllocations->groupBy('type')->map(function($group) {
+                            return [
+                                'count' => $group->count(),
+                                'ids' => $group->pluck('id')->toArray()
+                            ];
+                        })
+                    ]
                 ]
             ], 200);
 

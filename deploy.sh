@@ -174,6 +174,162 @@ if ! grep -q "APP_KEY=base64:" .env 2>/dev/null || grep -q "APP_KEY=base64:your_
     fi
 fi
 
+# ========================================
+# SSL SETUP
+# ========================================
+echo ""
+echo "🔐 SSL Certificate Setup"
+echo "================================"
+
+# Check if SSL certificates already exist
+if [ -f "ssl/fullchain.pem" ] && [ -f "ssl/privkey.pem" ]; then
+    echo "✅ SSL certificates already exist"
+    read -p "Do you want to renew/regenerate SSL certificates? (y/N): " renew_ssl
+    if [[ ! $renew_ssl =~ ^[Yy]$ ]]; then
+        echo "⏭️  Skipping SSL setup"
+        SKIP_SSL=true
+    fi
+fi
+
+if [ "$SKIP_SSL" != "true" ]; then
+    # Get domain from nginx config
+    DOMAIN_NAME=$(grep "server_name" nginx/default.conf | head -1 | awk '{print $2}' | sed 's/;//')
+    
+    if [ -z "$DOMAIN_NAME" ] || [ "$DOMAIN_NAME" == "localhost" ] || [[ $DOMAIN_NAME == *"_"* ]]; then
+        echo "⚠️  No domain configured in nginx/default.conf"
+        read -p "Enter your domain for SSL (e.g., syachdev.site) or leave empty to skip: " DOMAIN_INPUT
+        DOMAIN_NAME="$DOMAIN_INPUT"
+    fi
+    
+    if [ ! -z "$DOMAIN_NAME" ]; then
+        echo "📋 Domain detected: $DOMAIN_NAME"
+        echo "🌐 Server IP: $(curl -s ifconfig.me 2>/dev/null || echo 'Unable to detect')"
+        echo ""
+        echo "⚠️  IMPORTANT: Make sure DNS A record is pointing to this server!"
+        echo ""
+        
+        read -p "Do you want to setup SSL certificate for $DOMAIN_NAME? (y/N): " setup_ssl
+        
+        if [[ $setup_ssl =~ ^[Yy]$ ]]; then
+            # Check if certbot is installed
+            if ! command -v certbot &> /dev/null; then
+                echo "📦 Installing certbot..."
+                if check_root; then
+                    apt-get update -qq
+                    apt-get install -y certbot
+                else
+                    echo "⚠️  Please install certbot manually:"
+                    echo "   sudo apt-get update && sudo apt-get install -y certbot"
+                    echo ""
+                    read -p "Press Enter after installing certbot, or Ctrl+C to skip..."
+                fi
+            fi
+            
+            if command -v certbot &> /dev/null; then
+                echo ""
+                echo "🔐 Generating SSL certificate..."
+                echo "⚠️  This requires port 80 to be free and DNS to be configured"
+                echo ""
+                read -p "Press Enter to continue or Ctrl+C to cancel..."
+                
+                # Stop nginx container to free port 80
+                echo "🛑 Stopping nginx container temporarily..."
+                if check_docker_permissions; then
+                    docker stop cuanki-nginx 2>/dev/null || true
+                else
+                    sudo docker stop cuanki-nginx 2>/dev/null || true
+                fi
+                
+                # Generate certificate
+                CERT_EMAIL=""
+                read -p "Enter email for SSL certificate (or leave empty): " CERT_EMAIL
+                
+                if [ -z "$CERT_EMAIL" ]; then
+                    CERT_CMD="certbot certonly --standalone -d $DOMAIN_NAME -d www.$DOMAIN_NAME --non-interactive --agree-tos --register-unsafely-without-email"
+                else
+                    CERT_CMD="certbot certonly --standalone -d $DOMAIN_NAME -d www.$DOMAIN_NAME --non-interactive --agree-tos --email $CERT_EMAIL"
+                fi
+                
+                if check_root; then
+                    eval $CERT_CMD || {
+                        echo "⚠️  Certificate generation failed. Please check:"
+                        echo "   1. DNS is properly configured"
+                        echo "   2. Port 80 is accessible from internet"
+                        echo "   3. No firewall blocking port 80"
+                    }
+                else
+                    sudo $CERT_CMD || {
+                        echo "⚠️  Certificate generation failed. Please check:"
+                        echo "   1. DNS is properly configured"
+                        echo "   2. Port 80 is accessible from internet"
+                        echo "   3. No firewall blocking port 80"
+                    }
+                fi
+                
+                # Copy certificates if successful
+                if [ -d "/etc/letsencrypt/live/$DOMAIN_NAME" ]; then
+                    echo "📋 Copying SSL certificates..."
+                    if check_root; then
+                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/
+                        cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/
+                        chown $USER:$USER ssl/*.pem
+                        chmod 644 ssl/*.pem
+                    else
+                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem" ssl/
+                        sudo cp "/etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem" ssl/
+                        sudo chown $USER:$USER ssl/*.pem
+                        sudo chmod 644 ssl/*.pem
+                    fi
+                    
+                    echo "✅ SSL certificates installed successfully!"
+                    
+                    # Setup auto-renewal
+                    echo ""
+                    read -p "Do you want to setup automatic SSL renewal? (y/N): " setup_renewal
+                    if [[ $setup_renewal =~ ^[Yy]$ ]]; then
+                        CURRENT_DIR=$(pwd)
+                        cat > /tmp/renew-ssl.sh << EOF
+#!/bin/bash
+docker stop cuanki-nginx 2>/dev/null || true
+certbot renew --quiet
+if [ -d "/etc/letsencrypt/live/$DOMAIN_NAME" ]; then
+    cp /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem $CURRENT_DIR/ssl/
+    cp /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem $CURRENT_DIR/ssl/
+    chown $USER:$USER $CURRENT_DIR/ssl/*.pem
+fi
+docker start cuanki-nginx 2>/dev/null || true
+EOF
+                        
+                        if check_root; then
+                            mv /tmp/renew-ssl.sh /usr/local/bin/renew-ssl.sh
+                            chmod +x /usr/local/bin/renew-ssl.sh
+                            
+                            # Add to crontab if not exists
+                            (crontab -l 2>/dev/null | grep -v "renew-ssl.sh"; echo "0 3 * * * /usr/local/bin/renew-ssl.sh >> /var/log/ssl-renew.log 2>&1") | crontab -
+                        else
+                            sudo mv /tmp/renew-ssl.sh /usr/local/bin/renew-ssl.sh
+                            sudo chmod +x /usr/local/bin/renew-ssl.sh
+                            
+                            # Add to root crontab
+                            (sudo crontab -l 2>/dev/null | grep -v "renew-ssl.sh"; echo "0 3 * * * /usr/local/bin/renew-ssl.sh >> /var/log/ssl-renew.log 2>&1") | sudo crontab -
+                        fi
+                        
+                        echo "✅ Auto-renewal configured! SSL will renew automatically at 3 AM daily"
+                    fi
+                else
+                    echo "❌ SSL certificate generation failed or certificates not found"
+                fi
+            else
+                echo "❌ Certbot not available. Skipping SSL setup."
+            fi
+        else
+            echo "⏭️  Skipping SSL setup"
+        fi
+    else
+        echo "⏭️  No domain provided, skipping SSL setup"
+    fi
+fi
+
 # Set proper permissions
 echo "🔐 Setting permissions..."
 sudo chown -R $USER:$USER .
@@ -202,6 +358,14 @@ run_docker_compose down -v
 # Start services
 echo "🚀 Starting services..."
 run_docker_compose up -d --build
+
+# Fix Laravel storage & cache permissions inside container
+echo "🔐 Fixing Laravel storage & cache permissions inside container..."
+if check_docker_permissions; then
+    docker exec cuanki-api sh -c "chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache && chmod -R 775 /var/www/storage /var/www/bootstrap/cache" 2>/dev/null || true
+else
+    sudo docker exec cuanki-api sh -c "chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache && chmod -R 775 /var/www/storage /var/www/bootstrap/cache" 2>/dev/null || true
+fi
 
 # Wait for database to be ready
 echo "⏳ Waiting for database to be ready..."
@@ -237,8 +401,25 @@ echo ""
 echo "📊 Service Status:"
 run_docker_compose ps
 echo ""
-echo "🌐 Your API should be available at: $(grep APP_URL .env 2>/dev/null | cut -d '=' -f2 || echo 'Check your .env file')"
+FINAL_URL=$(grep APP_URL .env 2>/dev/null | cut -d '=' -f2 || echo 'Check your .env file')
+echo "🌐 Your API should be available at: $FINAL_URL"
 echo ""
+
+# SSL Status
+if [ -f "ssl/fullchain.pem" ] && [ -f "ssl/privkey.pem" ]; then
+    echo "🔐 SSL Status: ✅ Configured"
+    if [ -f "/usr/local/bin/renew-ssl.sh" ]; then
+        echo "   Auto-renewal: ✅ Enabled (runs daily at 3 AM)"
+    else
+        echo "   Auto-renewal: ❌ Not configured"
+    fi
+else
+    echo "🔐 SSL Status: ⚠️  Not configured"
+    echo "   You can setup SSL manually with:"
+    echo "   sudo certbot certonly --standalone -d your-domain.com -d www.your-domain.com"
+fi
+echo ""
+
 echo "🛠️ Useful Commands:"
 if check_docker_permissions; then
     echo "   📊 Check logs: docker-compose logs -f app"
@@ -262,6 +443,7 @@ fi
 echo ""
 echo "🔧 Troubleshooting:"
 echo "   📝 Edit .env: nano .env"
+echo "   📝 Edit nginx config: nano nginx/default.conf"
 echo "   🔍 Check app logs: $(check_docker_permissions && echo 'docker-compose' || echo 'sudo docker-compose') logs app"
 echo "   🔍 Check nginx logs: $(check_docker_permissions && echo 'docker-compose' || echo 'sudo docker-compose') logs nginx"
 echo ""
