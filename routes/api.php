@@ -54,6 +54,7 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::post('/add-expense', [TransactionController::class, 'addExpense']);
     Route::get('/detail-receipt-expense', [TransactionController::class, 'getDetailReceiptExpense']);
     Route::get('/detail-receipt-incomes', [TransactionController::class, 'getDetailReceiptIncomes']);
+    Route::get('/usage-bar', [TransactionController::class, 'getUsageBarToday']);
     
     // Asset/Account endpoints
     Route::post('/add-new-account', [AssetController::class, 'addNewAccount']);

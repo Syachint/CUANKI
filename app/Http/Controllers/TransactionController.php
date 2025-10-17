@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Controllers\UserController;
+use App\Models\User;
 use App\Models\Income;
 use App\Models\Account;
 use App\Models\AccountAllocation;
@@ -607,6 +609,62 @@ class TransactionController extends Controller
                     'user_id' => $user->id ?? 'unknown'
                 ]
             ], 500);
+        }
+    }
+
+    public function getUsageBarToday(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $userId = $user->id;
+            
+            if (!$user) {
+                return response()->json(['message' => 'User not found'], 404);
+            }
+
+            // Get today's date
+            $today = Carbon::now('Asia/Jakarta')->format('Y-m-d');
+            
+            // Get user's budget (from budgets table)
+            $dailyBudget = Budget::where('user_id', $userId)
+                ->whereNotNull('daily_budget')
+                ->first();
+
+            // Calculate daily limit
+            $dailyLimit = 0;
+            if ($dailyBudget && $dailyBudget->initial_daily_budget > 0) {
+                $dailyLimit = $dailyBudget->initial_daily_budget;
+            } else {
+                // Fallback: Calculate daily budget from account allocation
+                $totalAllocation = AccountAllocation::join('accounts', 'account_allocations.account_id', '=', 'accounts.id')
+                    ->where('accounts.user_id', $userId)
+                    ->sum('account_allocations.spending_limit');
+                
+                // Assuming monthly allocation, divide by 30 for daily
+                $dailyLimit = $totalAllocation > 0 ? $totalAllocation / 30 : 100000; // Default 100k if no allocation
+            }
+
+            // Get today's total expenses
+            $todayExpenses = Expense::where('user_id', $userId)
+                ->whereDate('expense_date', $today)
+                ->sum('amount');
+
+            // Calculate percentage
+            $percentage = $dailyLimit > 0 ? ($todayExpenses / $dailyLimit) * 100 : 0;
+            $percentage = min(100, $percentage); // Cap at 100%
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'today_spending' => number_format($todayExpenses, 0, ',', '.'),
+                    'daily_limit' => number_format($dailyLimit, 0, ',', '.'),
+                    'percentage' => round($percentage, 1),
+                    'formatted_text' => 'Transaksi anda hari ini: Rp ' . number_format($todayExpenses, 0, ',', '.') . '/Rp ' . number_format($dailyLimit, 0, ',', '.')
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Error getting usage bar: ' . $e->getMessage()], 500);
         }
     }
 
