@@ -107,7 +107,7 @@ class GoogleController extends Controller
         }
 
         // 🌐 Jika request dari browser (redirect via Google)
-        $frontendUrl = config('app.frontend_url', 'http://localhost:3000');
+        $frontendUrl = config('app.frontend_url', 'https://cuanki.vercel.app');
         return redirect()->away($frontendUrl . '/auth/google/callback?access_token=' . $access_token . '&refresh_token=' . $refresh_token);
     }
     /**

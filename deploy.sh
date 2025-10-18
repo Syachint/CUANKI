@@ -5,7 +5,7 @@
 
 set -e  # Exit on any error
 
-GITHUB_RAW_URL="https://raw.githubusercontent.com/Syachint/CUANKI/main"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/Syachint/CUANKI/main/docker-compose.yml"
 BRANCH="${1:-main}"  # Allow custom branch, default to main
 
 echo "🚀 Starting CUANKI API Deployment..."
