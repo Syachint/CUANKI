@@ -14,6 +14,156 @@ use Carbon\Carbon;
 class AchievementController extends Controller
 {
     /**
+     * Get user streak information (like TikTok streak)
+     */
+    public function getStreak(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not authenticated'
+                ], 401);
+            }
+
+            // Calculate current streak
+            $currentStreak = $this->calculateCurrentStreak($user);
+            
+            // Get streak status and next milestone
+            $streakInfo = $this->getStreakInfo($currentStreak);
+            
+            // Check if user has expense today
+            $hasExpenseToday = $this->hasExpenseToday($user);
+            
+            // Get streak history (last 30 days for visualization)
+            $streakHistory = $this->getStreakHistory($user);
+            
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Streak information retrieved successfully',
+                'data' => [
+                    'current_streak' => $currentStreak,
+                    'is_active_today' => $hasExpenseToday,
+                    'streak_status' => $streakInfo['status'],
+                    'next_milestone' => $streakInfo['next_milestone'],
+                    'days_to_milestone' => $streakInfo['days_to_milestone'],
+                    'streak_history' => $streakHistory,
+                    'fire_emoji' => $currentStreak >= 3 ? '🔥' : '⚡',
+                    'encouragement_message' => $this->getEncouragementMessage($currentStreak, $hasExpenseToday)
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to retrieve streak information: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get streak status information and next milestone
+     */
+    private function getStreakInfo($currentStreak)
+    {
+        $milestones = [
+            ['name' => 'Si Rajin', 'days' => 10],
+            ['name' => 'Si Disiplin', 'days' => 30],
+            ['name' => 'Si Ahli', 'days' => 50],
+            ['name' => 'Master Pengelola', 'days' => 100],
+            ['name' => 'Legenda Cuanki', 'days' => 1000]
+        ];
+
+        $status = 'Pemula';
+        $nextMilestone = null;
+        $daysToMilestone = null;
+
+        foreach ($milestones as $milestone) {
+            if ($currentStreak >= $milestone['days']) {
+                $status = $milestone['name'];
+            } else {
+                $nextMilestone = $milestone['name'];
+                $daysToMilestone = $milestone['days'] - $currentStreak;
+                break;
+            }
+        }
+
+        return [
+            'status' => $status,
+            'next_milestone' => $nextMilestone,
+            'days_to_milestone' => $daysToMilestone
+        ];
+    }
+
+    /**
+     * Check if user has expense today
+     */
+    private function hasExpenseToday($user)
+    {
+        $today = Carbon::now()->format('Y-m-d');
+        
+        return Expense::where('user_id', $user->id)
+                     ->whereDate('expense_date', $today)
+                     ->exists();
+    }
+
+    /**
+     * Get streak history for the last 30 days
+     */
+    private function getStreakHistory($user)
+    {
+        $history = [];
+        $startDate = Carbon::now()->subDays(29); // Last 30 days
+        
+        for ($i = 0; $i < 30; $i++) {
+            $date = $startDate->copy()->addDays($i);
+            $hasExpense = Expense::where('user_id', $user->id)
+                                ->whereDate('expense_date', $date->format('Y-m-d'))
+                                ->exists();
+            
+            $history[] = [
+                'date' => $date->format('Y-m-d'),
+                'day_name' => $date->format('D'),
+                'has_expense' => $hasExpense,
+                'is_today' => $date->isToday(),
+                'is_future' => $date->isFuture()
+            ];
+        }
+        
+        return $history;
+    }
+
+    /**
+     * Get encouragement message based on streak
+     */
+    private function getEncouragementMessage($currentStreak, $hasExpenseToday)
+    {
+        if (!$hasExpenseToday && $currentStreak > 0) {
+            return "Jangan putus streak! Catat pengeluaran hari ini untuk melanjutkan streak {$currentStreak} hari 🔥";
+        }
+        
+        if ($hasExpenseToday) {
+            if ($currentStreak == 1) {
+                return "Bagus! Streak pertama dimulai! Lanjutkan besok 🚀";
+            } elseif ($currentStreak < 7) {
+                return "Mantap! Streak {$currentStreak} hari! Terus semangat 💪";
+            } elseif ($currentStreak < 30) {
+                return "Keren banget! {$currentStreak} hari berturut-turut! Kamu hebat! 🔥";
+            } else {
+                return "WOW! {$currentStreak} hari streak! Kamu legend! 🏆⚡";
+            }
+        }
+        
+        if ($currentStreak == 0) {
+            return "Yuk mulai streak! Catat pengeluaran pertama hari ini 🎯";
+        }
+        
+        return "Tetap semangat mengelola keuangan! 💰";
+    }
+
+    /**
      * Get user badges with progress information
      */
     public function getUserBadges(Request $request)

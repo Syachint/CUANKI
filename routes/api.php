@@ -87,6 +87,9 @@ Route::middleware('auth:sanctum')->group(function() {
     Route::get('/badges', [AchievementController::class, 'getUserBadges']);
     Route::post('/badges/check', [AchievementController::class, 'triggerBadgeCheck']);
     
+    // Streak endpoints (like TikTok streak)
+    Route::get('/streak', [AchievementController::class, 'getStreak']);
+    
     // User Profile CRUD endpoints
     Route::get('/profile', [UserController::class, 'getUserProfile']);
     Route::put('/profile', [UserController::class, 'updateUserProfile']);
