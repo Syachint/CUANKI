@@ -34,7 +34,7 @@ class TransactionController extends Controller
             
             foreach ($accounts as $account) {
                 foreach ($account->allocations as $allocation) {
-                    $bankName = $account->bank ? $account->bank->bank_name : 'Unknown Bank';
+                    $bankName = $account->bank ? $account->bank->code_name : 'Unknown Bank';
                     $accountOptions[] = [
                         'value' => $bankName . ' - ' . $allocation->type,
                         'label' => $bankName . ' - ' . $allocation->type,
