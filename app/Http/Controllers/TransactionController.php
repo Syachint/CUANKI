@@ -70,7 +70,7 @@ class TransactionController extends Controller
                 'tanggal' => 'required|date',
                 'total' => 'required|numeric|min:0',
                 'notes' => 'nullable|string|max:255',
-                'aset' => 'required|string|max:255', // Account format: "BCA - Kebutuhan"
+                'aset' => 'required|string|max:255', // Account format: "bank_id - type"
             ]);
 
             $user = $request->user();
@@ -83,23 +83,21 @@ class TransactionController extends Controller
             }
 
             // Parse account name to find the account
-            // Format expected: "BCA - Kebutuhan" or similar
+            // Format expected: "bank_id - type" (e.g., "1 - Kebutuhan")
             $asetParts = explode(' - ', $request->aset);
             if (count($asetParts) !== 2) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Invalid account format. Expected format: "Bank - Type"'
+                    'message' => 'Invalid account format. Expected format: "bank_id - type"'
                 ], 400);
             }
 
-            $bankName = trim($asetParts[0]);
+            $bankId = trim($asetParts[0]);
             $allocationType = trim($asetParts[1]);
 
-            // Find the account based on bank_name and verify allocation type exists
+            // Find the account based on bank_id and verify allocation type exists
             $account = Account::where('user_id', $user->id)
-                ->whereHas('bank', function($query) use ($bankName) {
-                    $query->where('code_name', $bankName);
-                })
+                ->where('bank_id', $bankId)
                 ->whereHas('allocations', function($query) use ($allocationType) {
                     $query->where('type', $allocationType);
                 })
@@ -109,7 +107,7 @@ class TransactionController extends Controller
             if (!$account) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Account not found: ' . $bankName
+                    'message' => 'Account not found with bank_id: ' . $bankId
                 ], 404);
             }
 
@@ -153,7 +151,7 @@ class TransactionController extends Controller
                     'income_id' => $income->id,
                     'user_id' => $income->user_id,
                     'account_id' => $income->account_id,
-                    'account_name' => $account->bank ? $account->bank->bank_name : 'Unknown Bank',
+                    'account_name' => $account->bank ? $account->bank->code_name : 'Unknown Bank',
                     'amount' => $income->amount,
                     'note' => $income->note,
                     'received_date' => $income->received_date,
@@ -211,7 +209,7 @@ class TransactionController extends Controller
                 'total' => 'required|numeric|min:0',
                 'notes' => 'nullable|string|max:255',
                 'kategori' => 'required|integer|exists:expense_categories,id',
-                'aset' => 'required|string|max:255', // Account format: "BCA - Kebutuhan"
+                'aset' => 'required|string|max:255', // Account format: "bank_id - type"
             ]);
 
             $user = $request->user();
@@ -224,22 +222,21 @@ class TransactionController extends Controller
             }
 
             // Parse account name to find the account
+            // Format expected: "bank_id - type" (e.g., "1 - Kebutuhan")
             $asetParts = explode(' - ', $request->aset);
             if (count($asetParts) !== 2) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Invalid account format. Expected format: "Bank - Type"'
+                    'message' => 'Invalid account format. Expected format: "bank_id - type"'
                 ], 400);
             }
 
-            $bankName = trim($asetParts[0]);
+            $bankId = trim($asetParts[0]);
             $allocationType = trim($asetParts[1]);
 
-            // Find the account based on bank_name and verify allocation type exists
+            // Find the account based on bank_id and verify allocation type exists
             $account = Account::where('user_id', $user->id)
-                ->whereHas('bank', function($query) use ($bankName) {
-                    $query->where('code_name', $bankName);
-                })
+                ->where('bank_id', $bankId)
                 ->whereHas('allocations', function($query) use ($allocationType) {
                     $query->where('type', $allocationType);
                 })
@@ -249,7 +246,7 @@ class TransactionController extends Controller
             if (!$account) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Account not found: ' . $bankName
+                    'message' => 'Account not found with bank_id: ' . $bankId
                 ], 404);
             }
 
@@ -307,7 +304,7 @@ class TransactionController extends Controller
                     'expense_id' => $expense->id,
                     'user_id' => $expense->user_id,
                     'account_id' => $expense->account_id,
-                    'account_name' => $account->bank ? $account->bank->bank_name : 'Unknown Bank',
+                    'account_name' => $account->bank ? $account->bank->code_name : 'Unknown Bank',
                     'category_id' => $expense->expense_category_id,
                     'category_name' => $category->name,
                     'amount' => $expense->amount,
