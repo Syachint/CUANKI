@@ -15,11 +15,13 @@ class Budget extends Model
         'user_id',
         'account_id',
         'daily_budget',
+        'initial_daily_budget',
         'daily_saving',
     ];
 
     protected $casts = [
         'daily_budget' => 'decimal:2',
+        'initial_daily_budget' => 'decimal:2',
         'daily_saving' => 'decimal:2',
     ];
 

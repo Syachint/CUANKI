@@ -17,7 +17,7 @@ class DashboardController extends Controller
     {
         try {
             $user = $request->user();
-            $user->load(['accounts.allocations']);
+            $userId = $user->id;
             
             if (!$user) {
                 return response()->json([
@@ -26,39 +26,33 @@ class DashboardController extends Controller
                 ], 404);
             }
 
-            // Get today's date
+            // Ensure daily budget exists for today
+            $this->ensureDailyBudgetExists($userId);
+
+            // Get today's budget records from database
             $today = Carbon::now()->toDateString();
-            
-            // Get today's budget data from budget table
-            $todayBudgets = Budget::where('user_id', $user->id)
+            $todayBudgets = Budget::where('user_id', $userId)
                 ->whereDate('created_at', $today)
                 ->get();
 
-            $dailyBudget = 0;
+            // Get balance from accounts with type "kebutuhan" for display
+            $user->load(['accounts.allocations']);
             $kebutuhanBalance = 0;
+            foreach ($user->accounts as $account) {
+                $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
+                if ($kebutuhanAllocation) {
+                    $kebutuhanBalance += $kebutuhanAllocation->balance_per_type;
+                }
+            }
+            
+            // Get current month details - total days in month (30 or 31)
             $daysInMonth = Carbon::now()->daysInMonth;
 
-            if ($todayBudgets->isNotEmpty()) {
-                // Get daily budget from budget table (sum from all accounts)
-                $dailyBudget = $todayBudgets->sum('daily_budget');
-                
-                // Also get kebutuhan balance for reference
-                foreach ($user->accounts as $account) {
-                    $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
-                    if ($kebutuhanAllocation) {
-                        $kebutuhanBalance += $kebutuhanAllocation->balance_per_type;
-                    }
-                }
-            } else {
-                // Fallback: calculate from kebutuhan balance if no budget exists
-                foreach ($user->accounts as $account) {
-                    $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
-                    if ($kebutuhanAllocation) {
-                        $kebutuhanBalance += $kebutuhanAllocation->balance_per_type;
-                    }
-                }
-                $dailyBudget = $daysInMonth > 0 ? round($kebutuhanBalance / $daysInMonth, 0) : 0;
-            }
+            // Sum daily_budget from all accounts for today
+            $dailyBudget = $todayBudgets->sum('daily_budget');
+            $initialDailyBudget = $todayBudgets->sum('initial_daily_budget');
+            $budgetDifference = $dailyBudget - $initialDailyBudget;
+            $dataSource = 'budget_table';
 
             // Create greeting message
             $greetingMessage = "Hai, " . ($user->username ?: $user->name) . "! ini uang kamu hari ini Rp " . number_format($dailyBudget, 0, ',', '.');
@@ -72,11 +66,18 @@ class DashboardController extends Controller
                         'username' => $user->username
                     ],
                     'daily_budget' => [
-                        'amount' => $dailyBudget,
-                        'formatted' => 'Rp ' . number_format($dailyBudget, 0, ',', '.'),
+                        'current_amount' => $dailyBudget,
+                        'initial_amount' => $initialDailyBudget,
+                        'difference' => $budgetDifference,
+                        'is_reduced' => $budgetDifference < 0,
+                        'formatted' => [
+                            'current_amount' => 'Rp ' . number_format($dailyBudget, 0, ',', '.'),
+                            'initial_amount' => 'Rp ' . number_format($initialDailyBudget, 0, ',', '.'),
+                            'difference' => 'Rp ' . number_format($budgetDifference, 0, ',', '.')
+                        ],
                         'kebutuhan_balance' => $kebutuhanBalance,
                         'days_in_month' => $daysInMonth,
-                        'source' => $todayBudgets->isNotEmpty() ? 'budget_table' : 'calculated_from_kebutuhan',
+                        'source' => $dataSource,
                         'budget_records_count' => $todayBudgets->count()
                     ]
                 ]
@@ -343,11 +344,15 @@ class DashboardController extends Controller
             // Update account current_balance
             $oldCurrentBalance = $account->current_balance;
             $account->current_balance = $newCurrentBalance;
+            $account->initial_balance = $newCurrentBalance;
             $account->save();
 
             // Handle budget tracking for "Kebutuhan" type
             $budgetData = null;
             if ($type === 'Kebutuhan') {
+                // Reset dan update semua budget bulan ini dengan nilai baru
+                $this->resetMonthlyInitialBudget($user->id);
+                $this->updateMonthlyDailyBudget($user->id);
                 $budgetData = $this->handleBudgetTracking($user->id, $accountId, $newBalancePerType);
             }
 
@@ -398,6 +403,7 @@ class DashboardController extends Controller
     {
         try {
             $user = $request->user();
+            $userId = $user->id;
             
             if (!$user) {
                 return response()->json([
@@ -406,38 +412,66 @@ class DashboardController extends Controller
                 ], 404);
             }
 
+            // Ensure daily budget exists for today
+            $this->ensureDailyBudgetExists($userId);
+
             // Get today's date
             $today = Carbon::now()->toDateString();
             
             // Get today's budget data from budget table
-            $todayBudgets = Budget::where('user_id', $user->id)
+            $todayBudgets = Budget::where('user_id', $userId)
                 ->whereDate('created_at', $today)
                 ->get();
 
-            if ($todayBudgets->isEmpty()) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'No budget data found for today. Please update your account balance first.'
-                ], 404);
-            }
-
             // Sum daily_budget and daily_saving from all accounts for today
             $totalDailyBudget = $todayBudgets->sum('daily_budget');
+            $totalInitialBudget = $todayBudgets->sum('initial_daily_budget');
             $totalDailySaving = $todayBudgets->sum('daily_saving');
+            $budgetDifference = $totalDailyBudget - $totalInitialBudget;
 
-            // TODO: Today expenses will be implemented later via expenses function
-            $todayExpenses = 0; // Placeholder - will be replaced with actual expenses calculation
+            // Get today's expenses
+            $todayExpenses = Expense::where('user_id', $userId)
+                ->whereDate('expense_date', $today)
+                ->sum('amount');
+
+            // Calculate remaining budget (based on current daily budget)
+            $remainingBudget = max(0, $totalDailyBudget - $todayExpenses);
+            
+            // Check if over budget (based on current daily budget)
+            $isOverBudget = $todayExpenses > $totalDailyBudget;
+            $overBudgetAmount = $isOverBudget ? ($todayExpenses - $totalDailyBudget) : 0;
+
+            // Check vs initial budget
+            $isOverInitialBudget = $todayExpenses > $totalInitialBudget;
+            $overInitialBudgetAmount = $isOverInitialBudget ? ($todayExpenses - $totalInitialBudget) : 0;
 
             return response()->json([
                 'status' => 'success',
                 'data' => [
-                    'daily_budget' => $totalDailyBudget,
-                    'today_expenses' => $todayExpenses,
+                    'budget' => [
+                        'current_daily_budget' => $totalDailyBudget,
+                        'initial_daily_budget' => $totalInitialBudget,
+                        'budget_difference' => $budgetDifference,
+                        'is_budget_reduced' => $budgetDifference < 0
+                    ],
+                    'expenses' => [
+                        'today_expenses' => $todayExpenses,
+                        'remaining_budget' => $remainingBudget,
+                        'is_over_current_budget' => $isOverBudget,
+                        'over_current_budget_amount' => $overBudgetAmount,
+                        'is_over_initial_budget' => $isOverInitialBudget,
+                        'over_initial_budget_amount' => $overInitialBudgetAmount
+                    ],
                     'daily_saving' => $totalDailySaving,
                     'budget_records_count' => $todayBudgets->count(),
                     'formatted' => [
-                        'daily_budget' => 'Rp ' . number_format($totalDailyBudget, 0, ',', '.'),
+                        'current_daily_budget' => 'Rp ' . number_format($totalDailyBudget, 0, ',', '.'),
+                        'initial_daily_budget' => 'Rp ' . number_format($totalInitialBudget, 0, ',', '.'),
+                        'budget_difference' => 'Rp ' . number_format($budgetDifference, 0, ',', '.'),
                         'today_expenses' => 'Rp ' . number_format($todayExpenses, 0, ',', '.'),
+                        'remaining_budget' => 'Rp ' . number_format($remainingBudget, 0, ',', '.'),
+                        'over_current_budget_amount' => 'Rp ' . number_format($overBudgetAmount, 0, ',', '.'),
+                        'over_initial_budget_amount' => 'Rp ' . number_format($overInitialBudgetAmount, 0, ',', '.'),
                         'daily_saving' => 'Rp ' . number_format($totalDailySaving, 0, ',', '.')
                     ]
                 ]
@@ -455,6 +489,7 @@ class DashboardController extends Controller
     {
         try {
             $user = $request->user();
+            $userId = $user->id;
             
             if (!$user) {
                 return response()->json([
@@ -463,31 +498,39 @@ class DashboardController extends Controller
                 ], 404);
             }
 
+            // Ensure daily budget exists for today
+            $this->ensureDailyBudgetExists($userId);
+
             // Get today's date
             $today = Carbon::now()->toDateString();
             
             // Get today's budget data from budget table
-            $todayBudgets = Budget::where('user_id', $user->id)
+            $todayBudgets = Budget::where('user_id', $userId)
                 ->whereDate('created_at', $today)
                 ->get();
 
-            if ($todayBudgets->isEmpty()) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'No budget data found for today. Please update your account balance first.'
-                ], 404);
-            }
-
             // Sum daily_saving from all accounts for today
             $totalDailySaving = $todayBudgets->sum('daily_saving');
+            $totalDailyBudget = $todayBudgets->sum('daily_budget');
+            $totalInitialBudget = $todayBudgets->sum('initial_daily_budget');
+            $budgetDifference = $totalDailyBudget - $totalInitialBudget;
 
             return response()->json([
                 'status' => 'success',
                 'data' => [
                     'daily_saving' => $totalDailySaving,
+                    'budget' => [
+                        'current_daily_budget' => $totalDailyBudget,
+                        'initial_daily_budget' => $totalInitialBudget,
+                        'difference' => $budgetDifference,
+                        'is_reduced' => $budgetDifference < 0
+                    ],
                     'budget_records_count' => $todayBudgets->count(),
                     'formatted' => [
-                        'daily_saving' => 'Rp ' . number_format($totalDailySaving, 0, ',', '.')
+                        'daily_saving' => 'Rp ' . number_format($totalDailySaving, 0, ',', '.'),
+                        'current_daily_budget' => 'Rp ' . number_format($totalDailyBudget, 0, ',', '.'),
+                        'initial_daily_budget' => 'Rp ' . number_format($totalInitialBudget, 0, ',', '.'),
+                        'budget_difference' => 'Rp ' . number_format($budgetDifference, 0, ',', '.')
                     ]
                 ]
             ], 200);
@@ -517,9 +560,21 @@ class DashboardController extends Controller
         try {
             // Get current month details - total days in month (30 or 31)
             $daysInMonth = Carbon::now()->daysInMonth;
+            $currentYear = Carbon::now()->year;
+            $currentMonth = Carbon::now()->month;
             
-            // Calculate daily budget from kebutuhan balance divided by days in month
-            $dailyBudget = $daysInMonth > 0 ? round($kebutuhanBalance / $daysInMonth, 0) : 0;
+            // Get or calculate total kebutuhan balance for proportion calculation
+            $user = User::with(['accounts.allocations'])->find($userId);
+            $totalKebutuhanBalance = 0;
+            foreach ($user->accounts as $account) {
+                $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
+                if ($kebutuhanAllocation && $kebutuhanAllocation->balance_per_type > 0) {
+                    $totalKebutuhanBalance += $kebutuhanAllocation->balance_per_type;
+                }
+            }
+            
+            // Calculate proportion for this account
+            $accountProportion = $totalKebutuhanBalance > 0 ? ($kebutuhanBalance / $totalKebutuhanBalance) : 0;
 
             // Get existing budget for today
             $today = Carbon::now()->toDateString();
@@ -528,13 +583,22 @@ class DashboardController extends Controller
                 ->whereDate('created_at', $today)
                 ->first();
 
+            // Get monthly initial budget (tetap sepanjang bulan)
+            $monthlyInitialBudget = $this->getOrSetMonthlyInitialBudget($userId, $currentYear, $currentMonth);
+            $accountInitialBudget = round($monthlyInitialBudget * $accountProportion, 0);
+
             // Calculate daily saving
             $dailySaving = 0;
             
             if ($existingBudget) {
-                // If budget exists for today, keep existing daily_saving and update daily_budget
+                // If budget exists for today, keep existing daily_saving 
+                // Update daily_budget to follow initial budget (not current balance)
                 $dailySaving = $existingBudget->daily_saving;
-                $existingBudget->daily_budget = $dailyBudget;
+                $existingBudget->daily_budget = $accountInitialBudget; // Ikuti initial budget
+                // Keep initial_daily_budget unchanged if it already exists, or set to monthly initial
+                if (!$existingBudget->initial_daily_budget) {
+                    $existingBudget->initial_daily_budget = $accountInitialBudget;
+                }
                 $existingBudget->save();
                 $budget = $existingBudget;
             } else {
@@ -545,40 +609,35 @@ class DashboardController extends Controller
                     ->whereDate('created_at', $yesterday)
                     ->first();
 
-                // If yesterday had leftover money, add it to today's daily saving
+                // Transfer yesterday's daily_budget directly to today's daily_saving
                 if ($yesterdayBudget) {
-                    // Get yesterday's expenses from expense table
-                    $yesterdayExpenses = Expense::where('user_id', $userId)
-                        ->where('account_id', $accountId)
-                        ->whereDate('created_at', $yesterday)
-                        ->sum('amount');
-
-                    // Calculate yesterday's leftover (daily_budget - actual_expenses)
-                    $yesterdayLeftover = max(0, $yesterdayBudget->daily_budget - $yesterdayExpenses);
-                    
-                    // Add yesterday's leftover to previous daily_saving
-                    $dailySaving = $yesterdayBudget->daily_saving + $yesterdayLeftover;
+                    // Daily saving = yesterday's daily_saving + yesterday's daily_budget (dipindahkan langsung)
+                    $dailySaving = $yesterdayBudget->daily_saving + $yesterdayBudget->daily_budget;
                 }
 
                 // Create new budget record for today
                 $budget = Budget::create([
                     'user_id' => $userId,
                     'account_id' => $accountId,
-                    'daily_budget' => $dailyBudget,
+                    'daily_budget' => $accountInitialBudget, // Ikuti initial budget
+                    'initial_daily_budget' => $accountInitialBudget, // Initial budget yang tetap
                     'daily_saving' => $dailySaving,
                 ]);
             }
 
             return [
                 'budget_id' => $budget->id,
-                'daily_budget' => $dailyBudget,
+                'daily_budget' => $accountInitialBudget,
+                'initial_daily_budget' => $accountInitialBudget,
                 'daily_saving' => $dailySaving,
                 'kebutuhan_balance' => $kebutuhanBalance,
                 'days_in_month' => $daysInMonth,
-                'calculation' => "kebutuhan_balance ({$kebutuhanBalance}) / days_in_month ({$daysInMonth})",
+                'monthly_initial_budget' => $monthlyInitialBudget,
+                'calculation' => "monthly_initial_budget ({$monthlyInitialBudget}) * account_proportion",
                 'is_new_record' => !$existingBudget,
                 'formatted' => [
-                    'daily_budget' => 'Rp ' . number_format($dailyBudget, 0, ',', '.'),
+                    'daily_budget' => 'Rp ' . number_format($accountInitialBudget, 0, ',', '.'),
+                    'initial_daily_budget' => 'Rp ' . number_format($accountInitialBudget, 0, ',', '.'),
                     'daily_saving' => 'Rp ' . number_format($dailySaving, 0, ',', '.'),
                     'kebutuhan_balance' => 'Rp ' . number_format($kebutuhanBalance, 0, ',', '.')
                 ]
@@ -588,8 +647,379 @@ class DashboardController extends Controller
             return [
                 'error' => 'Failed to track budget: ' . $e->getMessage(),
                 'daily_budget' => 0,
+                'initial_daily_budget' => 0,
                 'daily_saving' => 0
             ];
+        }
+    }
+
+    /**
+     * Reset monthly initial budget when there's manual change
+     */
+    private function resetMonthlyInitialBudget($userId)
+    {
+        try {
+            $currentYear = Carbon::now()->year;
+            $currentMonth = Carbon::now()->month;
+            
+            // Delete existing initial budget records for this month to force recalculation
+            Budget::where('user_id', $userId)
+                ->whereYear('created_at', $currentYear)
+                ->whereMonth('created_at', $currentMonth)
+                ->whereNotNull('initial_daily_budget')
+                ->update([
+                    'initial_daily_budget' => null,
+                    'daily_budget' => null // Reset daily budget juga karena akan dihitung ulang
+                ]);
+
+            \Log::info("Reset monthly initial budget for user {$userId}, {$currentYear}-{$currentMonth}");
+            
+        } catch (\Exception $e) {
+            \Log::error('Failed to reset monthly initial budget: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Update daily budget untuk semua records bulan ini setelah perubahan manual
+     */
+    private function updateMonthlyDailyBudget($userId)
+    {
+        try {
+            $currentYear = Carbon::now()->year;
+            $currentMonth = Carbon::now()->month;
+            $daysInMonth = Carbon::now()->daysInMonth;
+
+            // Get user dengan accounts dan allocations
+            $user = User::with(['accounts.allocations'])->find($userId);
+            if (!$user) {
+                return;
+            }
+
+            // Calculate new initial budget dari saldo kebutuhan saat ini
+            $totalKebutuhanBalance = 0;
+            foreach ($user->accounts as $account) {
+                $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
+                if ($kebutuhanAllocation && $kebutuhanAllocation->balance_per_type > 0) {
+                    $totalKebutuhanBalance += $kebutuhanAllocation->balance_per_type;
+                }
+            }
+
+            $newInitialBudget = $daysInMonth > 0 ? round($totalKebutuhanBalance / $daysInMonth, 0) : 0;
+
+            // Update semua budget records bulan ini
+            $existingBudgets = Budget::where('user_id', $userId)
+                ->whereYear('created_at', $currentYear)
+                ->whereMonth('created_at', $currentMonth)
+                ->get();
+
+            foreach ($existingBudgets as $budget) {
+                // Get account proportion
+                $account = $user->accounts->where('id', $budget->account_id)->first();
+                if ($account) {
+                    $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
+                    $accountBalance = $kebutuhanAllocation ? $kebutuhanAllocation->balance_per_type : 0;
+                    $accountProportion = $totalKebutuhanBalance > 0 ? ($accountBalance / $totalKebutuhanBalance) : 0;
+                    $accountNewBudget = round($newInitialBudget * $accountProportion, 0);
+
+                    // Update both daily_budget dan initial_daily_budget
+                    $budget->daily_budget = $accountNewBudget;
+                    $budget->initial_daily_budget = $accountNewBudget;
+                    $budget->save();
+                }
+            }
+
+            \Log::info("Updated monthly daily budget for user {$userId}, new budget: {$newInitialBudget}");
+            
+        } catch (\Exception $e) {
+            \Log::error('Failed to update monthly daily budget: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Ensure daily budget exists for today for all user accounts
+     */
+    private function ensureDailyBudgetExists($userId)
+    {
+        try {
+            $today = Carbon::now()->toDateString();
+            
+            // Check if today's budget already exists
+            $existingBudgets = Budget::where('user_id', $userId)
+                ->whereDate('created_at', $today)
+                ->count();
+
+            // If no budget exists for today, generate it
+            if ($existingBudgets == 0) {
+                $this->generateDailyBudget($userId);
+            }
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to ensure daily budget exists: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Generate daily budget for all user accounts for today
+     */
+    private function generateDailyBudget($userId)
+    {
+        try {
+            // Get user with accounts and allocations
+            $user = User::with(['accounts.allocations'])->find($userId);
+            if (!$user) {
+                throw new \Exception('User not found');
+            }
+
+            // Get current month details
+            $daysInMonth = Carbon::now()->daysInMonth;
+            $today = Carbon::now()->toDateString();
+            $currentYear = Carbon::now()->year;
+            $currentMonth = Carbon::now()->month;
+
+            // Get or calculate initial daily budget (only set once per month)
+            $monthlyInitialBudget = $this->getOrSetMonthlyInitialBudget($userId, $currentYear, $currentMonth);
+
+            // Calculate accumulated daily saving from current month (excluding today)
+            $previousBudgets = Budget::where('user_id', $userId)
+                ->whereYear('created_at', $currentYear)
+                ->whereMonth('created_at', $currentMonth)
+                ->whereDate('created_at', '<', $today)
+                ->get();
+
+            $accumulatedDailySaving = 0;
+
+            // Calculate accumulated daily saving from previous days
+            // Daily saving = akumulasi daily_budget dari hari-hari sebelumnya (dipindahkan langsung)
+            foreach ($previousBudgets as $previousBudget) {
+                // Add daily_budget from previous day directly to daily_saving
+                $accumulatedDailySaving += $previousBudget->daily_budget;
+            }
+
+            // Calculate total current kebutuhan balance untuk proporsi saja
+            $totalKebutuhanBalance = 0;
+            foreach ($user->accounts as $account) {
+                $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
+                if ($kebutuhanAllocation && $kebutuhanAllocation->balance_per_type > 0) {
+                    $totalKebutuhanBalance += $kebutuhanAllocation->balance_per_type;
+                }
+            }
+
+            // Generate budget for each account that has "Kebutuhan" allocation
+            foreach ($user->accounts as $account) {
+                $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
+                
+                if ($kebutuhanAllocation && $kebutuhanAllocation->balance_per_type > 0) {
+                    // Calculate proportion for this account
+                    $accountProportion = $totalKebutuhanBalance > 0 ? 
+                        ($kebutuhanAllocation->balance_per_type / $totalKebutuhanBalance) : 0;
+                    
+                    // Both daily_budget and initial_daily_budget use same initial value
+                    $accountInitialBudget = round($monthlyInitialBudget * $accountProportion, 0);
+
+                    // Create budget record for today
+                    Budget::create([
+                        'user_id' => $userId,
+                        'account_id' => $account->id,
+                        'daily_budget' => $accountInitialBudget, // Ikuti initial budget
+                        'initial_daily_budget' => $accountInitialBudget, // Initial budget yang tetap
+                        'daily_saving' => $accumulatedDailySaving,
+                    ]);
+
+                    \Log::info("Generated daily budget for user {$userId}, account {$account->id}: daily_budget={$accountInitialBudget}, initial={$accountInitialBudget}");
+                }
+            }
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to generate daily budget: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Get or set monthly initial budget (calculated once per month)
+     */
+    private function getOrSetMonthlyInitialBudget($userId, $year, $month)
+    {
+        try {
+            // Check if we already have initial budget for this month
+            $existingInitialBudget = Budget::where('user_id', $userId)
+                ->whereYear('created_at', $year)
+                ->whereMonth('created_at', $month)
+                ->whereNotNull('initial_daily_budget')
+                ->first();
+
+            if ($existingInitialBudget && $existingInitialBudget->initial_daily_budget > 0) {
+                // Use existing initial budget for this month
+                return $existingInitialBudget->initial_daily_budget;
+            }
+
+            // Calculate new initial budget based on current kebutuhan balance
+            $user = User::with(['accounts.allocations'])->find($userId);
+            if (!$user) {
+                return 0;
+            }
+
+            $totalKebutuhanBalance = 0;
+            foreach ($user->accounts as $account) {
+                $kebutuhanAllocation = $account->allocations->where('type', 'Kebutuhan')->first();
+                if ($kebutuhanAllocation && $kebutuhanAllocation->balance_per_type > 0) {
+                    $totalKebutuhanBalance += $kebutuhanAllocation->balance_per_type;
+                }
+            }
+
+            // Calculate initial daily budget for this month
+            $daysInMonth = Carbon::createFromDate($year, $month, 1)->daysInMonth;
+            $initialDailyBudget = $daysInMonth > 0 ? round($totalKebutuhanBalance / $daysInMonth, 0) : 0;
+
+            \Log::info("Set new monthly initial budget for user {$userId}, {$year}-{$month}: {$initialDailyBudget}");
+            
+            return $initialDailyBudget;
+
+        } catch (\Exception $e) {
+            \Log::error('Failed to get/set monthly initial budget: ' . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Public endpoint to manually generate daily budget (for testing)
+     */
+    public function generateTodayBudget(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ], 404);
+            }
+
+            // Force generate budget for today
+            $this->generateDailyBudget($user->id);
+
+            // Get generated budgets
+            $today = Carbon::now()->toDateString();
+            $todayBudgets = Budget::where('user_id', $user->id)
+                ->whereDate('created_at', $today)
+                ->with('account')
+                ->get();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Daily budget generated successfully',
+                'data' => [
+                    'date' => $today,
+                    'total_daily_budget' => $todayBudgets->sum('daily_budget'),
+                    'budgets' => $todayBudgets->map(function($budget) {
+                        return [
+                            'account_id' => $budget->account_id,
+                            'account_name' => $budget->account->account_name ?? 'Unknown',
+                            'daily_budget' => $budget->daily_budget,
+                            'initial_daily_budget' => $budget->initial_daily_budget,
+                            'daily_saving' => $budget->daily_saving,
+                            'budget_difference' => $budget->daily_budget - $budget->initial_daily_budget,
+                            'formatted' => [
+                                'daily_budget' => 'Rp ' . number_format($budget->daily_budget, 0, ',', '.'),
+                                'initial_daily_budget' => 'Rp ' . number_format($budget->initial_daily_budget, 0, ',', '.'),
+                                'daily_saving' => 'Rp ' . number_format($budget->daily_saving, 0, ',', '.'),
+                                'budget_difference' => 'Rp ' . number_format($budget->daily_budget - $budget->initial_daily_budget, 0, ',', '.')
+                            ]
+                        ];
+                    }),
+                    'generated_at' => Carbon::now()->toDateTimeString()
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error generating daily budget: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get budget comparison showing initial vs current daily budget
+     */
+    public function getBudgetComparison(Request $request)
+    {
+        try {
+            $user = $request->user();
+            $userId = $user->id;
+            
+            if (!$user) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ], 404);
+            }
+
+            // Ensure daily budget exists for today
+            $this->ensureDailyBudgetExists($userId);
+
+            // Get today's budget records
+            $today = Carbon::now()->toDateString();
+            $todayBudgets = Budget::where('user_id', $userId)
+                ->whereDate('created_at', $today)
+                ->with('account')
+                ->get();
+
+            $totalInitialBudget = $todayBudgets->sum('initial_daily_budget');
+            $totalCurrentBudget = $todayBudgets->sum('daily_budget');
+            $totalDifference = $totalCurrentBudget - $totalInitialBudget;
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Budget comparison retrieved successfully',
+                'data' => [
+                    'date' => $today,
+                    'summary' => [
+                        'total_initial_daily_budget' => $totalInitialBudget,
+                        'total_current_daily_budget' => $totalCurrentBudget,
+                        'total_difference' => $totalDifference,
+                        'is_reduced' => $totalDifference < 0,
+                        'reduction_percentage' => $totalInitialBudget > 0 ? round(abs($totalDifference / $totalInitialBudget) * 100, 2) : 0,
+                        'formatted' => [
+                            'total_initial_daily_budget' => 'Rp ' . number_format($totalInitialBudget, 0, ',', '.'),
+                            'total_current_daily_budget' => 'Rp ' . number_format($totalCurrentBudget, 0, ',', '.'),
+                            'total_difference' => 'Rp ' . number_format($totalDifference, 0, ',', '.'),
+                            'reduction_percentage' => abs(round($totalInitialBudget > 0 ? ($totalDifference / $totalInitialBudget) * 100 : 0, 2)) . '%'
+                        ]
+                    ],
+                    'accounts_detail' => $todayBudgets->map(function($budget) {
+                        $difference = $budget->daily_budget - $budget->initial_daily_budget;
+                        return [
+                            'account_id' => $budget->account_id,
+                            'account_name' => $budget->account->account_name ?? 'Unknown',
+                            'initial_daily_budget' => $budget->initial_daily_budget,
+                            'current_daily_budget' => $budget->daily_budget,
+                            'difference' => $difference,
+                            'is_reduced' => $difference < 0,
+                            'daily_saving' => $budget->daily_saving,
+                            'formatted' => [
+                                'initial_daily_budget' => 'Rp ' . number_format($budget->initial_daily_budget, 0, ',', '.'),
+                                'current_daily_budget' => 'Rp ' . number_format($budget->daily_budget, 0, ',', '.'),
+                                'difference' => 'Rp ' . number_format($difference, 0, ',', '.'),
+                                'daily_saving' => 'Rp ' . number_format($budget->daily_saving, 0, ',', '.')
+                            ]
+                        ];
+                    }),
+                    'explanation' => [
+                        'initial_daily_budget' => 'Budget harian asli yang dihitung dari saldo kebutuhan / hari dalam bulan',
+                        'current_daily_budget' => 'Budget harian saat ini yang bisa berubah sesuai penggunaan',
+                        'difference' => 'Selisih antara budget saat ini dengan budget asli (- = berkurang, + = bertambah)',
+                        'daily_saving' => 'Akumulasi sisa budget dari hari-hari sebelumnya'
+                    ]
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error retrieving budget comparison: ' . $e->getMessage()
+            ], 500);
         }
     }
 }
