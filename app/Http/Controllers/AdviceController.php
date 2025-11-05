@@ -168,9 +168,6 @@ class AdviceController extends Controller
                 'data' => [
                     'page' => $page,
                     'reminder' => $aiResponse['text'],
-                    'context_analysis' => $contextualData['analysis'],
-                    'priority_level' => $contextualData['priority'],
-                    'action_suggestions' => $contextualData['suggestions']
                 ]
             ], 200);
 
