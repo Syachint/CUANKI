@@ -458,15 +458,23 @@ class MonthlyExpenseController extends Controller
             $query->where('user_id', $userId);
         })
         ->where('type', 'Kebutuhan')
-        ->whereDate('allocation_date', $now->toDateString())
         ->get();
+
+        if ($kebutuhanAllocations->isEmpty()) {
+        // ✅ FIXED: Don't set budget to 0 if no allocations found
+        \Log::warning("No Kebutuhan allocations found for user: {$userId}");
+        return 0; // Don't update budget, keep existing
+        }
 
         // Calculate total available balance for daily budget
         $totalKebutuhanBalance = $kebutuhanAllocations->sum('balance_per_type');
 
         // Subtract monthly expenses from total balance, then divide by days in month (dengan pembulatan)
-        $availableForDaily = $totalKebutuhanBalance - $totalMonthlyExpenses;
+        $availableForDaily = max(0, $totalKebutuhanBalance - $totalMonthlyExpenses);
         $newDailyBudget = $availableForDaily > 0 ? $this->roundCurrency($availableForDaily / $daysInMonth) : 0;
+
+        foreach ($kebutuhanAllocations as $allocation) {
+        $accountId = $allocation->account_id;
 
         // Update budget table - both daily_budget dan initial_daily_budget
         $budget = Budget::where('user_id', $userId)
@@ -474,19 +482,24 @@ class MonthlyExpenseController extends Controller
             ->first();
 
         if ($budget) {
-            $budget->daily_budget = $newDailyBudget;
             $budget->initial_daily_budget = $newDailyBudget; // Update initial juga
+            if ($budget->daily_budget > $budget->initial_daily_budget) {
+                $budget->daily_budget = $budget->initial_daily_budget;
+                continue;
+            }
             $budget->save();
         } else {
-            // Create budget record if not exists
-            Budget::create([
-                'user_id' => $userId,
-                'daily_budget' => $newDailyBudget,
-                'initial_daily_budget' => $newDailyBudget,
-                'daily_saving' => 0,
-                'date' => $now->toDateString()
-            ]);
+            if ($newDailyBudget > 0) {
+                Budget::create([
+                    'user_id' => $userId,
+                    'account_id' => $accountId,
+                    'daily_budget' => $budget->initial_daily_budget,
+                    'initial_daily_budget' => $newDailyBudget,
+                    'daily_saving' => 0,
+                ]);
+            }
         }
+    }
 
         return $newDailyBudget;
     }

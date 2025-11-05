@@ -634,14 +634,6 @@ class TransactionController extends Controller
             $dailyLimit = 0;
             if ($dailyBudget && $dailyBudget->initial_daily_budget > 0) {
                 $dailyLimit = $dailyBudget->initial_daily_budget;
-            } else {
-                // Fallback: Calculate daily budget from account allocation
-                $totalAllocation = AccountAllocation::join('accounts', 'account_allocations.account_id', '=', 'accounts.id')
-                    ->where('accounts.user_id', $userId)
-                    ->sum('account_allocations.spending_limit');
-                
-                // Assuming monthly allocation, divide by 30 for daily
-                $dailyLimit = $totalAllocation > 0 ? $totalAllocation / 30 : 100000; // Default 100k if no allocation
             }
 
             // Get today's total expenses
@@ -656,10 +648,10 @@ class TransactionController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'today_spending' => number_format($todayExpenses, 0, ',', '.'),
-                    'daily_limit' => number_format($dailyLimit, 0, ',', '.'),
+                    'current_daily_budget' => number_format($dailyBudget->daily_budget),
+                    'daily_limit' => number_format($dailyLimit),
                     'percentage' => round($percentage, 1),
-                    'formatted_text' => 'Transaksi anda hari ini: Rp ' . number_format($todayExpenses, 0, ',', '.') . '/Rp ' . number_format($dailyLimit, 0, ',', '.')
+                    'formatted_text' => 'Transaksi anda hari ini: Rp ' . number_format($dailyBudget->daily_budget) . '/Rp ' . number_format($dailyLimit)
                 ]
             ]);
             
