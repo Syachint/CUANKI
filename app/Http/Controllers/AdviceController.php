@@ -234,9 +234,24 @@ class AdviceController extends Controller
         // Calculate streak for transaction context
         $streak = app(\App\Http\Controllers\AchievementController::class)->calculateCurrentStreak($user);
 
-        // Get user's finance plan
-        $financePlan = \App\Models\UserFinancePlan::where('user_id', $user->id)->first();
-        $dailyBudget = $financePlan ? ($financePlan->monthly_income - $financePlan->saving_target_amount) / 30 : 0;
+            // Priority 1: Cari budget daily dari tabel Budget
+    $budget = \App\Models\Budget::where('user_id', $user->id)
+                ->whereNotNull('daily_budget')
+                ->first();
+    
+    if ($budget && $budget->initial_daily_budget > 0) {
+        $dailyBudget = $budget->initial_daily_budget;
+    } else {
+        // Priority 2: Fallback ke AccountAllocation spending_limit
+        $totalSpendingLimit = \App\Models\AccountAllocation::join('accounts', 'account_allocations.account_id', '=', 'accounts.id')
+                                ->where('accounts.user_id', $user->id)
+                                ->where('account_allocations.type', 'Kebutuhan')
+                                ->sum('account_allocations.spending_limit');
+        
+        if ($totalSpendingLimit > 0) {
+            $dailyBudget = $totalSpendingLimit / 30; // Convert monthly to daily
+        }
+    }
 
         $analysis = [
             'today_spending' => $todayExpenses,
@@ -366,7 +381,7 @@ class AdviceController extends Controller
                 $priority = $contextualData['priority'];
                 
                 return $basePrompt . "
-                Kamu adalah penasihat keuangan pribadi, dengan pengeluaran sehari segini Rp " . number_format($todaySpending, 0, ',', '.') . " dan anggaran harian Rp " . number_format($dailyBudget, 0, ',', '.') . "apakah sudah efektif?(jika " . ($overBudget ? "OVER BUDGET!" : "okee amannn") . " anggaran hari ini). Ini adalah streak dia " . $streak . " hari, jadi berikan semangat untuk selalu menyalakan streaknya. Response harus motivatif dan asik(max 150 kata) dalam bahasa Indonesia.
+                Kamu adalah penasihat keuangan pribadi, dengan pengeluaran sehari segini Rp {$todaySpending} dan anggaran harian Rp {$dailyBudget} apakah sudah efektif?(jika " . ($overBudget ? "OVER BUDGET!" : "okee amannn") . " anggaran hari ini), Ini adalah streak dia {$streak} hari, jadi berikan semangat untuk selalu menyalakan streaknya. Response harus motivatif dan asik(max 150 kata) dalam bahasa Indonesia.
                 ";
                 
             case 'asset':
@@ -376,24 +391,8 @@ class AdviceController extends Controller
                 $totalBalance = number_format($contextualData['analysis']['total_balance'], 0, ',', '.');
                 $priority = $contextualData['priority'];
                 
-                return $basePrompt . "
-                Hai {$username}! Kamu lagi cek asset nih. 
-                
-                Kondisi keuangan kamu:
-                - Jumlah akun: {$accountCount} akun
-                - Dana darurat: {$emergencyMonths} bulan dari penghasilan
-                - Tingkat tabungan: {$savingsRate}% dari income
-                - Total saldo: Rp {$totalBalance}
-                - Level prioritas: {$priority}
-                
-                Berikan reminder tentang kesehatan finansial berdasarkan data di atas:
-                
-                Jika dana darurat < 3 bulan: sarankan prioritas emergency fund
-                Jika cuma 1 akun: motivasi diversifikasi account
-                Jika savings rate > 20%: kasih pujian good job
-                Jika savings rate < 10%: motivasi untuk tingkatkan tabungan
-                
-                Berikan reminder dalam 1-2 paragraf yang actionable dan supportive.
+                return $basePrompt . " 
+                Hai {$username}! Kamu lagi cek asset nih. Kondisi keuangan kamu: Jumlah akun {$accountCount} akun, Dana darurat Rp {$emergencyMonths} bulan dari penghasilan, Tingkat tabungan Rp {$savingsRate}% dari income, Total saldo Rp {$totalBalance}, tampilkan semua nominalnya. Berikan reminder tentang kesehatan finansial berdasarkan data di atas: Jika dana darurat kurang dari 3 bulan sarankan prioritas emergency fund, Jika cuma 1 akun motivasi diversifikasi account, Jika savings rate lebih dari 20% kasih pujian good job, Jika savings rate kurang dari 10% motivasi untuk tingkatkan tabungan. Berikan reminder dalam 1-2 paragraf yang actionable dan supportive maksimal 150 kata dalam bahasa Indonesia.
                 ";
                 
             case 'goals':
@@ -533,7 +532,7 @@ class AdviceController extends Controller
                     $candidate = $data['candidates'][0] ?? null;
 
                     if ($candidate && isset($candidate['content']['parts'][0]['text'])) {
-                        $result['text'] = $candidate['content']['parts'][0]['text'];
+                        $result['text'] = trim($candidate['content']['parts'][0]['text']);
                         $result['sources'] = []; // Simplified - tidak pakai grounding sources
                         return $result;
                     } else {
