@@ -71,18 +71,20 @@ class AuthController extends Controller
             ]
         ], 201);
 
-        // Set refresh token sebagai httpOnly cookie (fixed parameter count)
-        setcookie(
-            'refresh_token',                     // name
-            $refresh_token,                      // value
-            $refreshTokenExpiresAt->getTimestamp(), // expires
-            '/',                                 // path
-            config('session.domain'),            // domain  
-            config('session.secure', false),     // secure
-            true                                 // httponly (parameter ke-7)
+        // Set refresh token sebagai httpOnly cookie menggunakan Laravel cookie helper
+        return $response->withCookie(
+            cookie(
+                'refresh_token',                    // name
+                $refresh_token,                     // value
+                $refreshTokenExpiresAt->diffInMinutes($this->now()), // minutes from now
+                '/',                                // path
+                null,                               // domain (null untuk current domain)
+                false,                              // secure (set false untuk localhost)
+                true,                               // httpOnly
+                false,                              // raw
+                'lax'                               // sameSite
+            )
         );
-
-        return $response;
     }
 
     function loginUser(Request $request) {
@@ -131,18 +133,20 @@ class AuthController extends Controller
                 ]
             ], 200);
 
-            // Set refresh token sebagai cookie (fixed parameter count)
-            setcookie(
-                'refresh_token',                     // name
-                $refresh_token,                      // value
-                $refreshTokenExpiresAt->getTimestamp(), // expires
-                '/',                                 // path
-                config('session.domain'),            // domain
-                config('session.secure', false),     // secure
-                true                                 // httponly (parameter ke-7)
+            // Set refresh token sebagai cookie menggunakan Laravel cookie helper
+            return $response->withCookie(
+                cookie(
+                    'refresh_token',                    // name
+                    $refresh_token,                     // value
+                    $refreshTokenExpiresAt->diffInMinutes($this->now()), // minutes from now
+                    '/',                                // path
+                    null,                               // domain (null untuk current domain)
+                    false,                              // secure (set false untuk localhost)
+                    true,                               // httpOnly
+                    false,                              // raw
+                    'lax'                               // sameSite
+                )
             );
-
-            return $response;
         } else {
             return response()->json([
                 'status' => 'error',
@@ -196,18 +200,20 @@ class AuthController extends Controller
             ]
         ]);
 
-        // Set refresh token baru ke cookies (fixed parameter count)
-        setcookie(
-            'refresh_token',                     // name
-            $newRefreshToken,                    // value
-            $refreshTokenExpiresAt->getTimestamp(), // expires
-            '/',                                 // path
-            config('session.domain'),            // domain
-            config('session.secure', false),     // secure
-            true                                 // httponly (parameter ke-7)
+        // Set refresh token baru ke cookies menggunakan Laravel cookie helper
+        return $response->withCookie(
+            cookie(
+                'refresh_token',                    // name
+                $newRefreshToken,                   // value
+                $refreshTokenExpiresAt->diffInMinutes($this->now()), // minutes from now
+                '/',                                // path
+                null,                               // domain (null untuk current domain)
+                false,                              // secure (set false untuk localhost)
+                true,                               // httpOnly
+                false,                              // raw
+                'lax'                               // sameSite
+            )
         );
-
-        return $response;
     }
 
     public function logout(Request $request)
