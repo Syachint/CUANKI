@@ -445,7 +445,10 @@ class MonthlyExpenseController extends Controller
     private function recalculateDailyBudget($userId)
     {
         $now = $this->now();
-        $daysInMonth = $now->daysInMonth;
+        
+        // Calculate remaining days in month (not total days)
+        $endOfMonth = $now->copy()->endOfMonth();
+        $remainingDaysInMonth = $now->diffInDays($endOfMonth) + 1; // +1 include today
 
         // Get all active monthly expenses for current month
         $totalMonthlyExpenses = MonthlyExpense::where('user_id', $userId)
@@ -469,9 +472,18 @@ class MonthlyExpenseController extends Controller
         // Calculate total available balance for daily budget
         $totalKebutuhanBalance = $kebutuhanAllocations->sum('balance_per_type');
 
-        // Subtract monthly expenses from total balance, then divide by days in month (dengan pembulatan)
-        $availableForDaily = max(0, $totalKebutuhanBalance - $totalMonthlyExpenses);
-        $newDailyBudget = $availableForDaily > 0 ? $this->roundCurrency($availableForDaily / $daysInMonth) : 0;
+        // Handle user with zero balance
+        if ($totalKebutuhanBalance == 0) {
+            $newDailyBudget = 0;
+            \Log::info("User {$userId} has zero Kebutuhan balance, setting daily budget to 0");
+        } else {
+            // Subtract monthly expenses from total balance, then divide by REMAINING days in month
+            $availableForDaily = max(0, $totalKebutuhanBalance - $totalMonthlyExpenses);
+            $newDailyBudget = $remainingDaysInMonth > 0 && $availableForDaily > 0 ? 
+                $this->roundCurrency($availableForDaily / $remainingDaysInMonth) : 0;
+        }
+
+        \Log::info("Recalculated daily budget for user {$userId}: {$newDailyBudget} (Balance: {$totalKebutuhanBalance}, Monthly expenses: {$totalMonthlyExpenses}, Remaining days: {$remainingDaysInMonth})");
 
         foreach ($kebutuhanAllocations as $allocation) {
         $accountId = $allocation->account_id;

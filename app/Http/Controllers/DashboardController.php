@@ -945,10 +945,11 @@ class DashboardController extends Controller
             }
 
             // Get current month details
-            $daysInMonth = $this->now()->daysInMonth;
-            $today = $this->now()->toDateString();
-            $currentYear = $this->now()->year;
-            $currentMonth = $this->now()->month;
+            $now = $this->now();
+            $daysInMonth = $now->daysInMonth;
+            $today = $now->toDateString();
+            $currentYear = $now->year;
+            $currentMonth = $now->month;
 
             // Get or calculate initial daily budget (only set once per month)
             $monthlyInitialBudget = $this->getOrSetMonthlyInitialBudget($userId, $currentYear, $currentMonth);
@@ -1041,11 +1042,20 @@ class DashboardController extends Controller
                 }
             }
 
-            // Calculate initial daily budget for this month
-            $daysInMonth = $this->carbonFromDate($year, $month, 1)->daysInMonth;
-            $initialDailyBudget = $daysInMonth > 0 ? round($totalKebutuhanBalance / $daysInMonth, 0) : 0;
+            // Calculate initial daily budget for remaining days in this month (not total days)
+            $today = $this->now();
+            $endOfMonth = $this->carbonFromDate($year, $month, 1)->endOfMonth();
+            $remainingDaysInMonth = $today->diffInDays($endOfMonth); // +1 include today
+            
+            // For user with zero balance, set budget to 0
+            if ($totalKebutuhanBalance == 0) {
+                $initialDailyBudget = 0;
+                \Log::info("User {$userId} has zero balance, setting daily budget to 0");
+            } else {
+                $initialDailyBudget = $remainingDaysInMonth > 0 ? round($totalKebutuhanBalance / $remainingDaysInMonth, 0) : 0;
+            }
 
-            \Log::info("Set new monthly initial budget for user {$userId}, {$year}-{$month}: {$initialDailyBudget}");
+            \Log::info("Set new monthly initial budget for user {$userId}, {$year}-{$month}: {$initialDailyBudget} (Balance: {$totalKebutuhanBalance}, Remaining days: {$remainingDaysInMonth})");
             
             return $initialDailyBudget;
 
