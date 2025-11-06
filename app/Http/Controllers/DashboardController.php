@@ -107,23 +107,9 @@ class DashboardController extends Controller
                 'data' => [
                     'user' => [
                         'name' => $user->name,
-                        'username' => $user->username
+                        'username' => $user->username,
+                        'daily_budget' => 'Rp ' . number_format($dailyBudget, 0, ',', '.')
                     ],
-                    'daily_budget' => [
-                        'current_amount' => $dailyBudget,
-                        'initial_amount' => $initialDailyBudget,
-                        'difference' => $budgetDifference,
-                        'is_reduced' => $budgetDifference < 0,
-                        'formatted' => [
-                            'current_amount' => 'Rp ' . number_format($dailyBudget, 0, ',', '.'),
-                            'initial_amount' => 'Rp ' . number_format($initialDailyBudget, 0, ',', '.'),
-                            'difference' => 'Rp ' . number_format($budgetDifference, 0, ',', '.')
-                        ],
-                        'kebutuhan_balance' => $kebutuhanBalance,
-                        'days_in_month' => $daysInMonth,
-                        'source' => $dataSource,
-                        'budget_records_count' => $todayBudgets->count()
-                    ]
                 ]
             ], 200);
 
