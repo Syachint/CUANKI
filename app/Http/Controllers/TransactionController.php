@@ -678,7 +678,7 @@ class TransactionController extends Controller
             $dailyLimit = 0;
             if ($dailyBudget && $dailyBudget->initial_daily_budget > 0) {
                 $dailyLimit = $dailyBudget->initial_daily_budget;
-            } if ($dailyBudget > $dailyLimit) {
+            } if ($dailyLimit < $dailyBudget->daily_budget) {
                 $dailyLimit = $dailyBudget->daily_budget;
             }
 

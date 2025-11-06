@@ -7,7 +7,10 @@ use App\Models\User;
 use App\Models\BankData;
 use App\Models\Account;
 use App\Models\AccountAllocation;
+use App\Models\Budget;
+use App\Models\Expense;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class AssetController extends Controller
 {
@@ -250,6 +253,13 @@ class AssetController extends Controller
                 $this->resetMonthlyInitialBudget($user->id);
                 $this->updateMonthlyDailyBudget($user->id);
                 $budgetData = $this->handleBudgetTracking($user->id, $createdAccount->id, $balancePerType);
+                
+                \Log::info("Budget tracking for new Kebutuhan account", [
+                    'user_id' => $user->id,
+                    'account_id' => $createdAccount->id,
+                    'balance' => $balancePerType,
+                    'budget_data' => $budgetData
+                ]);
             }
             
             // Reload user data to get updated accounts
@@ -791,6 +801,53 @@ class AssetController extends Controller
                     ];
                 }
 
+                // Track all Kebutuhan allocations that might be affected by changes
+                $kebutuhanAllocationsAffected = [];
+                
+                // Check if current allocation was or became "Kebutuhan"
+                if ($currentType === 'Kebutuhan' || ($newType && $newType === 'Kebutuhan')) {
+                    $kebutuhanAllocationsAffected[] = [
+                        'allocation_id' => $allocationId,
+                        'account_id' => $targetAllocation->account_id,
+                        'old_type' => $currentType,
+                        'new_type' => $newType ?? $currentType,
+                        'old_balance' => $currentBalance,
+                        'new_balance' => $newBalance ?? $currentBalance,
+                        'reason' => 'direct_update'
+                    ];
+                }
+                
+                // Check for swap allocations that affect "Kebutuhan"
+                if ($updateType && isset($changeLog['type_change'])) {
+                    $swapInfo = $changeLog['type_change'];
+                    
+                    // If we swapped with a "Kebutuhan" allocation
+                    if (isset($swapInfo['swapped_with'])) {
+                        $swappedType = $swapInfo['swapped_with']['new_type'] ?? null;
+                        if ($swappedType === 'Kebutuhan') {
+                            // Find the swapped allocation
+                            $swappedAllocation = AccountAllocation::whereHas('account', function($query) use ($user) {
+                                    $query->where('user_id', $user->id);
+                                })
+                                ->where('type', 'Kebutuhan')
+                                ->where('id', '!=', $allocationId)
+                                ->first();
+                                
+                            if ($swappedAllocation) {
+                                $kebutuhanAllocationsAffected[] = [
+                                    'allocation_id' => $swappedAllocation->id,
+                                    'account_id' => $swappedAllocation->account_id,
+                                    'old_type' => 'Kebutuhan',
+                                    'new_type' => 'Kebutuhan',
+                                    'old_balance' => $swapInfo['swapped_with']['old_balance'] ?? 0,
+                                    'new_balance' => $swappedAllocation->balance_per_type,
+                                    'reason' => 'swap_affected'
+                                ];
+                            }
+                        }
+                    }
+                }
+
                 // Recalculate all account balances with smart initial_balance logic
                 foreach ($userAccounts as $account) {
                     $account->refresh();
@@ -809,13 +866,38 @@ class AssetController extends Controller
                     ]);
                 }
 
-                // Handle budget tracking for "Kebutuhan" type
-                $budgetData = null;
-                $finalAllocation = $targetAllocation->fresh();
-                if ($finalAllocation->type === 'Kebutuhan') {
-                    $this->resetMonthlyInitialBudget($user->id);
-                    $this->updateMonthlyDailyBudget($user->id);
-                    $budgetData = $this->handleBudgetTracking($user->id, $finalAllocation->account_id, $finalAllocation->balance_per_type);
+                // Handle budget tracking for ALL affected "Kebutuhan" allocations
+                $budgetData = [];
+                if (!empty($kebutuhanAllocationsAffected)) {
+                    foreach ($kebutuhanAllocationsAffected as $affectedKebutuhan) {
+                        if ($affectedKebutuhan['new_type'] === 'Kebutuhan') {
+                            // Reset and update budget for this specific Kebutuhan allocation
+                            $this->resetMonthlyInitialBudget($user->id);
+                            $this->updateMonthlyDailyBudget($user->id);
+                            
+                            $budgetResult = $this->handleBudgetTracking(
+                                $user->id, 
+                                $affectedKebutuhan['account_id'], 
+                                $affectedKebutuhan['new_balance']
+                            );
+                            
+                            $budgetData[] = array_merge($budgetResult, [
+                                'affected_allocation' => $affectedKebutuhan
+                            ]);
+                            
+                            \Log::info("Budget updated for Kebutuhan allocation", [
+                                'user_id' => $user->id,
+                                'allocation_id' => $affectedKebutuhan['allocation_id'],
+                                'account_id' => $affectedKebutuhan['account_id'],
+                                'old_balance' => $affectedKebutuhan['old_balance'],
+                                'new_balance' => $affectedKebutuhan['new_balance'],
+                                'reason' => $affectedKebutuhan['reason']
+                            ]);
+                        }
+                    }
+                } else {
+                    // No Kebutuhan allocations affected
+                    $budgetData = null;
                 }
 
                 DB::commit();
@@ -841,8 +923,8 @@ class AssetController extends Controller
                                 'balance' => $currentBalance
                             ],
                             'new_values' => [
-                                'type' => $finalAllocation->type,
-                                'balance' => $finalAllocation->balance_per_type
+                                // 'type' => $finalAllocation->type,
+                                // 'balance' => $finalAllocation->balance_per_type
                             ],
                             'total_banks' => $totalBanks,
                             'change_log' => $changeLog
@@ -997,7 +1079,7 @@ class AssetController extends Controller
                         $today = now()->toDateString();
                         
                         // Get today's budget for this account
-                        $todayBudget = \App\Models\Budget::where('user_id', $userId)
+                        $todayBudget = Budget::where('user_id', $userId)
                             ->where('account_id', $account->id)
                             ->whereDate('created_at', $today)
                             ->first();
@@ -1190,25 +1272,242 @@ class AssetController extends Controller
         }
     }
 
+    /**
+     * Get current datetime with proper timezone
+     */
+    private function now()
+    {
+        return Carbon::now(config('app.timezone', 'Asia/Jakarta'));
+    }
+
+    /**
+     * Calculate total Kebutuhan balance across all user accounts
+     */
+    private function getTotalKebutuhanBalance($userId)
+    {
+        return AccountAllocation::whereHas('account', function($query) use ($userId) {
+                $query->where('user_id', $userId);
+            })
+            ->where('type', 'Kebutuhan')
+            ->sum('balance_per_type');
+    }
+
+    /**
+     * Get total expenses that already happened today for specific user and account
+     */
+    private function getTodayExpenses($userId, $accountId)
+    {
+        try {
+            $today = $this->now()->toDateString();
+            
+            $todayExpenses = Expense::where('user_id', $userId)
+                ->where('account_id', $accountId)
+                ->whereDate('expense_date', $today)
+                ->sum('amount');
+                
+            \Log::info("Today expenses for user {$userId}, account {$accountId}: {$todayExpenses}");
+            
+            return (float) $todayExpenses;
+        } catch (\Exception $e) {
+            \Log::error("Failed to get today expenses for user {$userId}, account {$accountId}: " . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * Reset monthly initial budget - set initial_daily_budget to 0 for current month
+     */
     private function resetMonthlyInitialBudget($userId)
     {
-        // Implementation for resetting monthly initial budget
-        // This should be implemented based on your budget logic
+        try {
+            $currentDate = $this->now();
+            $startOfMonth = $currentDate->copy()->startOfMonth();
+            $endOfMonth = $currentDate->copy()->endOfMonth();
+            
+            // Reset initial_daily_budget for all budgets in current month
+            Budget::where('user_id', $userId)
+                ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
+                ->update(['initial_daily_budget' => 0]);
+                
+            \Log::info("Reset monthly initial budget for user {$userId}");
+        } catch (\Exception $e) {
+            \Log::error("Failed to reset monthly initial budget for user {$userId}: " . $e->getMessage());
+        }
     }
 
+    /**
+     * Update monthly daily budget based on current Kebutuhan balance and remaining days
+     */
     private function updateMonthlyDailyBudget($userId)
     {
-        // Implementation for updating monthly daily budget
-        // This should be implemented based on your budget logic
+        try {
+            // Get all accounts with Kebutuhan allocations for this user
+            $kebutuhanAllocations = AccountAllocation::whereHas('account', function($query) use ($userId) {
+                    $query->where('user_id', $userId);
+                })
+                ->where('type', 'Kebutuhan')
+                ->with('account')
+                ->get();
+
+            if ($kebutuhanAllocations->isEmpty()) {
+                \Log::info("No Kebutuhan allocations found for user {$userId}");
+                return;
+            }
+
+            // Calculate total Kebutuhan balance across all accounts
+            $totalKebutuhanBalance = $kebutuhanAllocations->sum('balance_per_type');
+            
+            // Calculate remaining days from today until end of month
+            $currentDate = $this->now();
+            $endOfMonth = $currentDate->copy()->endOfMonth();
+            $remainingDaysInMonth = $currentDate->diffInDays($endOfMonth) + 1; // +1 to include today
+            
+            // Calculate new daily budget using remaining days (fair distribution)
+            $newDailyBudget = 0;
+            if ($remainingDaysInMonth > 0 && $totalKebutuhanBalance > 0) {
+                $newDailyBudget = round($totalKebutuhanBalance / $remainingDaysInMonth, 0);
+            }
+
+            // Update all existing budgets for this month
+            $today = $currentDate->toDateString();
+            $updatedCount = 0;
+            
+            foreach ($kebutuhanAllocations as $allocation) {
+                $existingBudget = Budget::where('user_id', $userId)
+                    ->where('account_id', $allocation->account_id)
+                    ->whereDate('created_at', $today)
+                    ->first();
+
+                if ($existingBudget) {
+                    // Get today's expenses to calculate proper daily_budget
+                    $todayExpenses = $this->getTodayExpenses($userId, $allocation->account_id);
+                    $adjustedDailyBudget = max(0, $newDailyBudget - $todayExpenses);
+                    
+                    $existingBudget->update([
+                        'daily_budget' => $adjustedDailyBudget,  // Available budget after expenses
+                        'initial_daily_budget' => max($existingBudget->initial_daily_budget, $newDailyBudget)  // Reference budget
+                    ]);
+                    $updatedCount++;
+                }
+            }
+            
+            \Log::info("Updated {$updatedCount} budgets for user {$userId} with new daily budget: {$newDailyBudget}, remaining days: {$remainingDaysInMonth}");
+            
+        } catch (\Exception $e) {
+            \Log::error("Failed to update monthly daily budget for user {$userId}: " . $e->getMessage());
+        }
     }
 
+    /**
+     * Handle budget tracking with proper daily budget calculation using remaining days
+     */
     private function handleBudgetTracking($userId, $accountId, $amount)
     {
-        // Implementation for handling budget tracking
-        // This should return budget tracking data
-        return [
-            'budget_updated' => true,
-            'amount' => $amount
-        ];
+        try {
+            // Calculate remaining days from today until end of month for fair daily budget calculation
+            $currentDate = $this->now();
+            $endOfMonth = $currentDate->copy()->endOfMonth();
+            $remainingDaysInMonth = $currentDate->diffInDays($endOfMonth) + 1; // +1 to include today
+            
+            // Calculate new daily budget from updated kebutuhan balance using remaining days
+            $newDailyBudget = 0;
+            if ($remainingDaysInMonth > 0 && $amount > 0) {
+                $newDailyBudget = round($amount / $remainingDaysInMonth, 0);
+            }
+
+            // Get today's date
+            $today = $currentDate->toDateString();
+            
+            // Check if budget exists for today
+            $existingBudget = Budget::where('user_id', $userId)
+                ->where('account_id', $accountId)
+                ->whereDate('created_at', $today)
+                ->first();
+
+            if ($existingBudget) {
+                // Update existing budget with new daily_budget, considering today's expenses
+                $oldDailyBudget = $existingBudget->daily_budget;
+                $oldInitialDailyBudget = $existingBudget->initial_daily_budget;
+                
+                // Get expenses that already happened today
+                $todayExpenses = $this->getTodayExpenses($userId, $accountId);
+                
+                // Calculate adjusted daily budget (new initial budget - today's expenses)
+                $adjustedDailyBudget = max(0, $newDailyBudget - $todayExpenses);
+                
+                $existingBudget->update([
+                    'daily_budget' => $adjustedDailyBudget,  // Available budget after expenses
+                    'initial_daily_budget' => max($oldInitialDailyBudget, $newDailyBudget)  // Reference budget
+                ]);
+                
+                return [
+                    'budget_id' => $existingBudget->id,
+                    'action' => 'updated',
+                    'old_daily_budget' => $oldDailyBudget,
+                    'new_daily_budget' => $adjustedDailyBudget,  // Available budget after expenses
+                    'new_initial_daily_budget' => $newDailyBudget,  // Full budget reference
+                    'daily_budget_change' => $adjustedDailyBudget - $oldDailyBudget,
+                    'today_expenses' => $todayExpenses,
+                    'initial_daily_budget' => $existingBudget->initial_daily_budget,
+                    'kebutuhan_balance' => $amount,
+                    'remaining_days_in_month' => $remainingDaysInMonth,
+                    'calculation_method' => 'remaining_days_fair_distribution_with_expenses',
+                    'formatted' => [
+                        'old_daily_budget' => 'Rp ' . number_format($oldDailyBudget, 0, ',', '.'),
+                        'new_daily_budget' => 'Rp ' . number_format($adjustedDailyBudget, 0, ',', '.'),
+                        'new_initial_daily_budget' => 'Rp ' . number_format($newDailyBudget, 0, ',', '.'),
+                        'daily_budget_change' => 'Rp ' . number_format($adjustedDailyBudget - $oldDailyBudget, 0, ',', '.'),
+                        'today_expenses' => 'Rp ' . number_format($todayExpenses, 0, ',', '.'),
+                        'kebutuhan_balance' => 'Rp ' . number_format($amount, 0, ',', '.'),
+                        'remaining_days' => $remainingDaysInMonth . ' hari'
+                    ]
+                ];
+            } else {
+                // Create new budget record, considering today's expenses (if any)
+                $todayExpenses = $this->getTodayExpenses($userId, $accountId);
+                $adjustedDailyBudget = max(0, $newDailyBudget - $todayExpenses);
+                
+                $budget = Budget::create([
+                    'user_id' => $userId,
+                    'account_id' => $accountId,
+                    'daily_budget' => $adjustedDailyBudget,  // Available budget after expenses
+                    'initial_daily_budget' => $newDailyBudget,  // Full budget reference
+                    'daily_saving' => 0,
+                ]);
+                
+                return [
+                    'budget_id' => $budget->id,
+                    'action' => 'created',
+                    'old_daily_budget' => 0,
+                    'new_daily_budget' => $adjustedDailyBudget,  // Available budget
+                    'new_initial_daily_budget' => $newDailyBudget,  // Full budget reference
+                    'daily_budget_change' => $adjustedDailyBudget,
+                    'today_expenses' => $todayExpenses,
+                    'initial_daily_budget' => $newDailyBudget,
+                    'daily_saving' => 0,
+                    'kebutuhan_balance' => $amount,
+                    'remaining_days_in_month' => $remainingDaysInMonth,
+                    'calculation_method' => 'remaining_days_fair_distribution_with_expenses',
+                    'formatted' => [
+                        'old_daily_budget' => 'Rp 0',
+                        'new_daily_budget' => 'Rp ' . number_format($adjustedDailyBudget, 0, ',', '.'),
+                        'new_initial_daily_budget' => 'Rp ' . number_format($newDailyBudget, 0, ',', '.'),
+                        'daily_budget_change' => 'Rp ' . number_format($adjustedDailyBudget, 0, ',', '.'),
+                        'today_expenses' => 'Rp ' . number_format($todayExpenses, 0, ',', '.'),
+                        'kebutuhan_balance' => 'Rp ' . number_format($amount, 0, ',', '.'),
+                        'remaining_days' => $remainingDaysInMonth . ' hari'
+                    ]
+                ];
+            }
+
+        } catch (\Exception $e) {
+            \Log::error("Budget tracking failed for user {$userId}, account {$accountId}: " . $e->getMessage());
+            return [
+                'error' => 'Failed to track budget: ' . $e->getMessage(),
+                'action' => 'failed',
+                'new_daily_budget' => 0,
+                'kebutuhan_balance' => $amount
+            ];
+        }
     }
 }
