@@ -323,14 +323,20 @@ class TransactionController extends Controller
     private function updateBudgetFromIncome($userId, $accountId, $newKebutuhanBalance)
     {
         try {
-            // Get current month details - total days in month (30 or 31)
-            $daysInMonth = $this->now()->daysInMonth;
+            // Get remaining days from today until end of month for fair daily budget calculation
+            $currentDate = $this->now();
+            $endOfMonth = $currentDate->copy()->endOfMonth();
+            $remainingDaysInMonth = $currentDate->diffInDays($endOfMonth); // +1 to include today
             
-            // Calculate new daily budget from updated kebutuhan balance
-            $newDailyBudget = $daysInMonth > 0 ? round($newKebutuhanBalance / $daysInMonth, 0) : 0;
+            // Calculate new daily budget from updated kebutuhan balance using remaining days
+            // This ensures fair distribution for users registering mid-month or adding income later
+            $newDailyBudget = 0;
+            if ($remainingDaysInMonth > 0 && $newKebutuhanBalance > 0) {
+                $newDailyBudget = round($newKebutuhanBalance / $remainingDaysInMonth, 0);
+            }
 
             // Get today's date
-            $today = $this->now()->toDateString();
+            $today = $currentDate->toDateString();
             
             // Check if budget exists for today
             $existingBudget = Budget::where('user_id', $userId)
@@ -352,7 +358,7 @@ class TransactionController extends Controller
                     'daily_budget_increase' => $newDailyBudget - $oldDailyBudget,
                     'daily_saving' => $existingBudget->daily_saving,
                     'kebutuhan_balance' => $newKebutuhanBalance,
-                    'days_in_month' => $daysInMonth,
+                    'remaining_days_in_month' => $remainingDaysInMonth,
                     'formatted' => [
                         'old_daily_budget' => 'Rp ' . number_format($oldDailyBudget, 0, ',', '.'),
                         'new_daily_budget' => 'Rp ' . number_format($newDailyBudget, 0, ',', '.'),
@@ -378,7 +384,7 @@ class TransactionController extends Controller
                     'daily_budget_increase' => $newDailyBudget,
                     'daily_saving' => 0,
                     'kebutuhan_balance' => $newKebutuhanBalance,
-                    'days_in_month' => $daysInMonth,
+                    'remaining_days_in_month' => $remainingDaysInMonth,
                     'formatted' => [
                         'old_daily_budget' => 'Rp 0',
                         'new_daily_budget' => 'Rp ' . number_format($newDailyBudget, 0, ',', '.'),
@@ -402,11 +408,13 @@ class TransactionController extends Controller
     private function updateBudgetFromExpense($userId, $accountId, $expenseAmount, $newKebutuhanBalance)
     {
         try {
-            // Get current month details - total days in month (30 or 31)
-            $daysInMonth = $this->now()->daysInMonth;
+            // Get remaining days from today until end of month for consistency with income calculation
+            $currentDate = $this->now();
+            $endOfMonth = $currentDate->copy()->endOfMonth();
+            $remainingDaysInMonth = $currentDate->diffInDays($endOfMonth); // +1 to include today
 
             // Get today's date
-            $today = $this->now()->toDateString();
+            $today = $currentDate->toDateString();
             
             // Check if budget exists for today
             $existingBudget = Budget::where('user_id', $userId)
@@ -457,7 +465,7 @@ class TransactionController extends Controller
                     'is_over_budget' => $expenseAmount > $oldDailyBudget,
                     'total_coverage' => ($oldDailyBudget + $oldDailySaving),
                     'kebutuhan_balance' => $newKebutuhanBalance,
-                    'days_in_month' => $daysInMonth,
+                    'remaining_days_in_month' => $remainingDaysInMonth,
                     'formatted' => [
                         'old_daily_budget' => 'Rp ' . number_format($oldDailyBudget, 0, ',', '.'),
                         'new_daily_budget' => 'Rp ' . number_format($newDailyBudget, 0, ',', '.'),
@@ -472,11 +480,17 @@ class TransactionController extends Controller
                 ];
             } else {
                 // This shouldn't happen for expenses, but handle it just in case
+                // Calculate what the daily budget would be based on current balance
+                $calculatedDailyBudget = $remainingDaysInMonth > 0 && $newKebutuhanBalance > 0 
+                    ? round($newKebutuhanBalance / $remainingDaysInMonth, 0) 
+                    : 0;
+                    
                 return [
                     'action' => 'no_budget_found',
                     'message' => 'No budget found for today. Please update account balance first.',
-                    'new_daily_budget' => $newDailyBudget,
-                    'kebutuhan_balance' => $newKebutuhanBalance
+                    'new_daily_budget' => $calculatedDailyBudget,
+                    'kebutuhan_balance' => $newKebutuhanBalance,
+                    'remaining_days_in_month' => $remainingDaysInMonth
                 ];
             }
 
