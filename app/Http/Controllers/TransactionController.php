@@ -641,9 +641,10 @@ class TransactionController extends Controller
                 ->whereDate('expense_date', $today)
                 ->sum('amount');
 
-            // Calculate percentage
-            $percentage = $dailyLimit > 0 ? ($todayExpenses / $dailyLimit) * 100 : 0;
-            $percentage = min(100, $percentage); // Cap at 100%
+            // Calculate percentage (100% to 0% - remaining budget percentage)
+            $remainingBudget = max(0, $dailyBudget->daily_budget);
+            $percentage = $dailyLimit > 0 ? ($remainingBudget / $dailyLimit) * 100 : 100;
+            $percentage = max(0, min(100, $percentage)); // Cap between 0% and 100%
 
             return response()->json([
                 'success' => true,
