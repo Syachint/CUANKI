@@ -323,36 +323,28 @@ class DashboardController extends Controller
                 ], 404);
             }
 
-            // Ensure daily budget exists for today
             $this->ensureDailyBudgetExists($userId);
 
-            // Get today's date
             $today = $this->now()->toDateString();
             
-            // Get today's budget data from budget table
             $todayBudgets = Budget::where('user_id', $userId)
                 ->whereDate('created_at', $today)
                 ->get();
 
-            // Sum daily_budget and daily_saving from all accounts for today (dengan pembulatan)
             $totalDailyBudget = $this->roundCurrency($todayBudgets->sum('daily_budget'));
             $totalInitialBudget = $this->roundCurrency($todayBudgets->sum('initial_daily_budget'));
             $totalDailySaving = $this->roundCurrency($todayBudgets->sum('daily_saving'));
             $budgetDifference = $this->roundCurrency($totalDailyBudget - $totalInitialBudget);
 
-            // Get today's expenses
             $todayExpenses = Expense::where('user_id', $userId)
                 ->whereDate('expense_date', $today)
                 ->sum('amount');
 
-            // Calculate remaining budget (based on current daily budget)
             $remainingBudget = max(0, $totalDailyBudget - $todayExpenses);
             
-            // Check if over budget (based on current daily budget)
             $isOverBudget = $todayExpenses > $totalDailyBudget;
             $overBudgetAmount = $isOverBudget ? ($todayExpenses - $totalDailyBudget) : 0;
 
-            // Check vs initial budget
             $isOverInitialBudget = $todayExpenses > $totalInitialBudget;
             $overInitialBudgetAmount = $isOverInitialBudget ? ($todayExpenses - $totalInitialBudget) : 0;
 
@@ -467,38 +459,25 @@ class DashboardController extends Controller
                 ], 404);
             }
 
-            // Get today's date
             $today = $this->now()->toDateString();
             $todayStart = $this->now()->startOfDay();
             $todayEnd = $this->now()->endOfDay();
             
-            // Get today's expenses with category and account info (include monthly expenses)
             $todayExpenses = Expense::where('user_id', $userId)
-                ->where(function($query) use ($today, $todayStart, $todayEnd) {
-                    $query->whereDate('expense_date', $today)
-                          ->orWhereBetween('expense_date', [$todayStart, $todayEnd])
-                          ->orWhereDate('created_at', $today);
-                })
+                ->whereDate('expense_date', $today)
                 ->with(['category', 'account.bank'])
                 ->orderBy('created_at', 'desc')
                 ->get();
 
-            // Get today's incomes with account info
             $todayIncomes = Income::where('user_id', $userId)
-                ->where(function($query) use ($today, $todayStart, $todayEnd) {
-                    $query->whereDate('received_date', $today)
-                          ->orWhereBetween('received_date', [$todayStart, $todayEnd])
-                          ->orWhereDate('created_at', $today);
-                })
+                ->whereDate('received_date', $today)
                 ->with(['account.bank'])
                 ->orderBy('created_at', 'desc')
                 ->get();
 
-            // Calculate totals
             $totalExpenses = $todayExpenses->sum('amount');
             $totalIncomes = $todayIncomes->sum('amount');
 
-            // Format expenses list with created_at timestamp for sorting
             $expenseTransactions = $todayExpenses->map(function ($expense) {
                 $isMonthlyExpense = $expense->frequency === 'Bulanan';
                 return [
@@ -508,7 +487,7 @@ class DashboardController extends Controller
                     'amount' => $expense->amount,
                     'is_income' => false,
                     'expense_time' => $expense->created_at->format('H:i'),
-                    'expense_date_raw' => $expense->expense_date,
+                    'expense_date_raw' => Carbon::parse($expense->expense_date)->format('d M Y'),
                     'formatted_amount' => '-' . number_format($expense->amount, 0, ',', '.'),
                     'is_monthly_expense' => $isMonthlyExpense,
                     'expense_type' => $isMonthlyExpense ? 'Monthly Budget' : 'Regular',
@@ -516,7 +495,6 @@ class DashboardController extends Controller
                 ];
             });
 
-            // Format incomes list with created_at timestamp for sorting
             $incomeTransactions = $todayIncomes->map(function ($income) {
                 return [
                     'id' => $income->id,
@@ -525,17 +503,15 @@ class DashboardController extends Controller
                     'amount' => $income->amount,
                     'is_income' => true,
                     'expense_time' => $income->created_at->format('H:i'),
-                    'expense_date_raw' => $income->received_date,
+                    'expense_date_raw' => Carbon::parse($income->received_date)->format('d M Y'),
                     'formatted_amount' => '+' . number_format($income->amount, 0, ',', '.'),
                     'created_at_timestamp' => $income->created_at->timestamp
                 ];
             });
 
-            // Combine and sort all transactions by created_at timestamp desc (newest first)
             $allTransactions = $expenseTransactions->concat($incomeTransactions)
                 ->sortByDesc('created_at_timestamp')
                 ->map(function($transaction) {
-                    // Remove timestamp dari response final
                     unset($transaction['created_at_timestamp']);
                     return $transaction;
                 })
