@@ -813,7 +813,7 @@ class AssetController extends Controller
                         'new_type' => $newType ?? $currentType,
                         'old_balance' => $currentBalance,
                         'new_balance' => $newBalance ?? $currentBalance,
-                        'reason' => 'direct_update'
+                        'reason' => 'direct_update',
                     ];
                 }
                 
