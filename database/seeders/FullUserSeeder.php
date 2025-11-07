@@ -81,6 +81,7 @@ class FullUserSeeder extends Seeder
             'username' => 'sinta_dewi',
             'age' => 20,
             'status' => 'mahasiswa',
+            'origin_id' => 1,
             'created_at' => now()->subDays(3),
             'updated_at' => now()
         ]);
@@ -158,6 +159,7 @@ class FullUserSeeder extends Seeder
             'username' => 'budi_santoso',
             'age' => 25,
             'status' => 'mahasiswa',
+            'origin_id' => 3,
             'created_at' => now()->subDays(45),
             'updated_at' => now()
         ]);
@@ -291,6 +293,7 @@ class FullUserSeeder extends Seeder
             'username' => 'maya_sari',
             'age' => 22,
             'status' => 'mahasiswa',
+            'origin_id' => 10,
             'created_at' => now()->subDays(60),
             'updated_at' => now()
         ]);
@@ -421,6 +424,7 @@ class FullUserSeeder extends Seeder
             'username' => 'andi_wijaya',
             'age' => 24,
             'status' => 'mahasiswa',
+            'origin_id' => 17,
             'created_at' => now()->subDays(90),
             'updated_at' => now()
         ]);
@@ -510,6 +514,7 @@ class FullUserSeeder extends Seeder
             'username' => 'lisa_kartika',
             'age' => 23,
             'status' => 'mahasiswa',
+            'origin_id' => 16,
             'created_at' => now()->subDays(120),
             'updated_at' => now()
         ]);
