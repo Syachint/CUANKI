@@ -18,7 +18,7 @@ class DatabaseSeeder extends Seeder
             OriginSeeder::class,
             BadgeSeeder::class,
             BankDataSeeder::class,
-            FullUserSeeder::class,
+            UserSeeder::class,
         ]);
     }
 }
