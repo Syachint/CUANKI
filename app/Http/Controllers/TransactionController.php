@@ -415,10 +415,33 @@ class TransactionController extends Controller
                 ->first();
 
             if ($existingBudget) {
-                // Directly subtract expense from daily_budget for today
+                // Smart budget deduction: daily_budget first, then daily_saving if needed
                 $oldDailyBudget = $existingBudget->daily_budget;
-                $newDailyBudget = $oldDailyBudget - $expenseAmount;
+                $oldDailySaving = $existingBudget->daily_saving;
+                
+                if ($oldDailyBudget >= $expenseAmount) {
+                    // Normal case: expense covered by daily budget
+                    $newDailyBudget = $oldDailyBudget - $expenseAmount;
+                    $newDailySaving = $oldDailySaving;
+                    $usedFromSaving = 0;
+                } else {
+                    // Over budget case: use daily_budget + daily_saving
+                    $remainingExpense = $expenseAmount - $oldDailyBudget;
+                    $newDailyBudget = 0; // Daily budget becomes 0
+                    
+                    if ($oldDailySaving >= $remainingExpense) {
+                        // Daily saving can cover the remaining expense
+                        $newDailySaving = $oldDailySaving - $remainingExpense;
+                        $usedFromSaving = $remainingExpense;
+                    } else {
+                        // Not enough daily saving, use all available
+                        $newDailySaving = 0;
+                        $usedFromSaving = $oldDailySaving;
+                    }
+                }
+                
                 $existingBudget->daily_budget = $newDailyBudget;
+                $existingBudget->daily_saving = $newDailySaving;
                 $existingBudget->save();
                 
                 return [
@@ -426,17 +449,24 @@ class TransactionController extends Controller
                     'action' => 'updated_after_expense',
                     'old_daily_budget' => $oldDailyBudget,
                     'new_daily_budget' => $newDailyBudget,
-                    'daily_budget_decrease' => $expenseAmount,
+                    'old_daily_saving' => $oldDailySaving,
+                    'new_daily_saving' => $newDailySaving,
+                    'daily_budget_decrease' => min($expenseAmount, $oldDailyBudget),
+                    'daily_saving_decrease' => $usedFromSaving,
                     'expense_amount' => $expenseAmount,
-                    'daily_saving' => $existingBudget->daily_saving,
+                    'is_over_budget' => $expenseAmount > $oldDailyBudget,
+                    'total_coverage' => ($oldDailyBudget + $oldDailySaving),
                     'kebutuhan_balance' => $newKebutuhanBalance,
                     'days_in_month' => $daysInMonth,
                     'formatted' => [
                         'old_daily_budget' => 'Rp ' . number_format($oldDailyBudget, 0, ',', '.'),
                         'new_daily_budget' => 'Rp ' . number_format($newDailyBudget, 0, ',', '.'),
-                        'daily_budget_decrease' => 'Rp ' . number_format($expenseAmount, 0, ',', '.'),
+                        'old_daily_saving' => 'Rp ' . number_format($oldDailySaving, 0, ',', '.'),
+                        'new_daily_saving' => 'Rp ' . number_format($newDailySaving, 0, ',', '.'),
+                        'daily_budget_decrease' => 'Rp ' . number_format(min($expenseAmount, $oldDailyBudget), 0, ',', '.'),
+                        'daily_saving_decrease' => 'Rp ' . number_format($usedFromSaving, 0, ',', '.'),
                         'expense_amount' => 'Rp ' . number_format($expenseAmount, 0, ',', '.'),
-                        'daily_saving' => 'Rp ' . number_format($existingBudget->daily_saving, 0, ',', '.'),
+                        'total_coverage' => 'Rp ' . number_format(($oldDailyBudget + $oldDailySaving), 0, ',', '.'),
                         'kebutuhan_balance' => 'Rp ' . number_format($newKebutuhanBalance, 0, ',', '.')
                     ]
                 ];

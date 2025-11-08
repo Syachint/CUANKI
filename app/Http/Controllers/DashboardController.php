@@ -94,11 +94,16 @@ class DashboardController extends Controller
             // Sum daily_budget from all accounts for today
             // Round to 2 decimal places untuk pembacaan yang lebih rapi
             $dailyBudget = $this->roundCurrency($todayBudgets->sum('daily_budget'));
+            $dailySaving = $this->roundCurrency($todayBudgets->sum('daily_saving'));
             $initialDailyBudget = $this->roundCurrency($todayBudgets->sum('initial_daily_budget'));
             $budgetDifference = $this->roundCurrency($dailyBudget - $initialDailyBudget);
+            
+            // Ensure daily budget is never negative (minimum Rp 0)
+            $displayDailyBudget = max(0, $dailyBudget);
+            $totalAvailable = $displayDailyBudget + $dailySaving;
             $dataSource = 'budget_table';
 
-            // Create greeting message
+            // Create greeting message with total available funds
             $greetingMessage = "Hai, " . ($user->username ?: $user->name) . "! ini uang kamu hari ini Rp " . number_format($dailyBudget, 0, ',', '.');
 
             return response()->json([
@@ -108,7 +113,7 @@ class DashboardController extends Controller
                     'user' => [
                         'name' => $user->name,
                         'username' => $user->username,
-                        'daily_budget' => 'Rp ' . number_format($dailyBudget, 0, ',', '.')
+                        'daily_budget' => 'Rp ' . number_format($displayDailyBudget, 0, ',', '.'),
                     ],
                 ]
             ], 200);
@@ -417,24 +422,16 @@ class DashboardController extends Controller
             $totalDailyBudget = $this->roundCurrency($todayBudgets->sum('daily_budget'));
             $totalInitialBudget = $this->roundCurrency($todayBudgets->sum('initial_daily_budget'));
             $budgetDifference = $this->roundCurrency($totalDailyBudget - $totalInitialBudget);
+            
+            // Ensure daily budget display is never negative
+            $displayDailyBudget = max(0, $totalDailyBudget);
+            $totalAvailable = $displayDailyBudget + $totalDailySaving;
+            $isOverBudget = $totalDailyBudget < 0;
 
             return response()->json([
                 'status' => 'success',
                 'data' => [
                     'daily_saving' => $totalDailySaving,
-                    'budget' => [
-                        'current_daily_budget' => $totalDailyBudget,
-                        'initial_daily_budget' => $totalInitialBudget,
-                        'difference' => $budgetDifference,
-                        'is_reduced' => $budgetDifference < 0
-                    ],
-                    'budget_records_count' => $todayBudgets->count(),
-                    'formatted' => [
-                        'daily_saving' => 'Rp ' . number_format($totalDailySaving, 0, ',', '.'),
-                        'current_daily_budget' => 'Rp ' . number_format($totalDailyBudget, 0, ',', '.'),
-                        'initial_daily_budget' => 'Rp ' . number_format($totalInitialBudget, 0, ',', '.'),
-                        'budget_difference' => 'Rp ' . number_format($budgetDifference, 0, ',', '.')
-                    ]
                 ]
             ], 200);
 
