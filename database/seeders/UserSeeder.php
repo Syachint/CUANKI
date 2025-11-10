@@ -105,6 +105,8 @@ class UserSeeder extends Seeder
         $itsarAccount = Account::create([
             'user_id' => 1,
             'bank_id' => 1, // Assuming BCA bank_id = 1
+            'initial_balance' => 2300000,
+            'current_balance' => 2300000,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -137,6 +139,8 @@ class UserSeeder extends Seeder
         $santaAccount1 = Account::create([
             'user_id' => 2,
             'bank_id' => 2, // Assuming Mandiri bank_id = 2
+            'initial_balance' => 500000,
+            'current_balance' => 500000,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -144,6 +148,8 @@ class UserSeeder extends Seeder
         $santaAccount2 = Account::create([
             'user_id' => 2,
             'bank_id' => 3, // Assuming BRI bank_id = 3
+            'initial_balance' => 1400000,
+            'current_balance' => 1400000,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -176,6 +182,8 @@ class UserSeeder extends Seeder
         $ianAccount1 = Account::create([
             'user_id' => 3,
             'bank_id' => 4, // Assuming CIMB bank_id = 4
+            'initial_balance' => 750000,
+            'current_balance' => 750000,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -183,6 +191,8 @@ class UserSeeder extends Seeder
         $ianAccount2 = Account::create([
             'user_id' => 3,
             'bank_id' => 1, // BCA
+            'initial_balance' => 900000,
+            'current_balance' => 900000,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -190,6 +200,8 @@ class UserSeeder extends Seeder
         $ianAccount3 = Account::create([
             'user_id' => 3,
             'bank_id' => 2, // Mandiri
+            'initial_balance' => 350000,
+            'current_balance' => 350000,
             'created_at' => now(),
             'updated_at' => now(),
         ]);
