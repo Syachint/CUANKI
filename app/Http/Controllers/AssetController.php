@@ -1084,7 +1084,7 @@ class AssetController extends Controller
                             ->whereDate('created_at', $today)
                             ->first();
                         
-                        $initialBudget = $todayBudget ? $todayBudget->initial_daily_budget : $currentBalance;
+                        $initialBudget = $account->initial_balance; // Default to initial balance
                         
                         if ($initialBudget > 0) {
                             $usagePercentage = ($currentBalance / $initialBudget) * 100;
