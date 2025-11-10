@@ -73,7 +73,7 @@ class DashboardController extends Controller
             $this->ensureDailyBudgetExists($userId);
 
             // Get today's budget records from database
-            $today = $this->now()->toDateString();
+            $today = Carbon::now('Asia/Jakarta')->format('Y-m-d');
             $todayBudgets = Budget::where('user_id', $userId)
                 ->whereDate('created_at', $today)
                 ->get();

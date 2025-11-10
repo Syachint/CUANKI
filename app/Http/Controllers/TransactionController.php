@@ -671,7 +671,7 @@ class TransactionController extends Controller
             
             // Get user's budget (from budgets table)
             $dailyBudget = Budget::where('user_id', $userId)
-                ->whereNotNull('daily_budget')
+                ->whereDate('created_at', $today)
                 ->first();
 
             // Calculate daily limit
